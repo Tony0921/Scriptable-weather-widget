@@ -8,11 +8,11 @@ const USE_BACKGROUND_GRADIENT = true; // 是否使用漸層背景
 // ========= 主程式 =========
 async function run() {
 	const widget = new ListWidget();
-	widget.setPadding(10, 12, 12, 12);
+	widget.setPadding(10, 12, 10, 12);
 
-	const [current, forecast] = await Promise.all([
+	const [current, forecastList] = await Promise.all([
 		fetchCurrentWeather(),
-		fetchForecast3h()
+		fetchForecast()
 	]);
 
 	if (!current) {
@@ -70,7 +70,7 @@ async function run() {
 	body.layoutHorizontally();
 	body.centerAlignContent();
 
-	// ----- 左欄：今天相關（高低溫、濕度、風速、日出日落） -----
+	// ----- 左欄 -----
 	const leftCol = body.addStack();
 	leftCol.layoutVertically();
 	leftCol.size = new Size(0, 0);   // 讓 Scriptable 自動分配寬度
@@ -92,6 +92,15 @@ async function run() {
 	extraLine.textColor = Color.white();
 	extraLine.minimumScaleFactor = 0.7;
 
+	// 左右欄中間空隙
+	body.addSpacer();
+
+	// ----- 右欄 -----
+	const rightCol = body.addStack();
+	rightCol.layoutVertically();
+	rightCol.size = new Size(0, 0);
+	rightCol.setPadding(0, 0, 0, 0);
+	
 	const sunriseUnix = current.sys?.sunrise;
 	const sunsetUnix = current.sys?.sunset;
 
@@ -99,71 +108,100 @@ async function run() {
 		const sunriseStr = formatTimeFromUnix(sunriseUnix);
 		const sunsetStr = formatTimeFromUnix(sunsetUnix);
 
-		const sunLine1 = leftCol.addText(`日出 ${sunriseStr}`);
+		const sunLine1 = rightCol.addText(`日出 ${sunriseStr}`);
 		sunLine1.font = Font.systemFont(11);
 		sunLine1.textColor = new Color("#ffd27f");
 		sunLine1.minimumScaleFactor = 0.7;
 
-		const sunLine2 = leftCol.addText(`日落 ${sunsetStr}`);
+		const sunLine2 = rightCol.addText(`日落 ${sunsetStr}`);
 		sunLine2.font = Font.systemFont(11);
 		sunLine2.textColor = new Color("#ffd27f");
 		sunLine2.minimumScaleFactor = 0.7;
 	}
 
-	// 左右欄中間空隙
-	body.addSpacer(10);
+	widget.addSpacer(6);
+	// ------
+	const body2 = widget.addStack();
+	body2.layoutHorizontally();
+	body2.centerAlignContent();
 
-	// ----- 右欄：未來 3 小時預報 + 更新時間 -----
-	const rightCol = body.addStack();
-	rightCol.layoutVertically();
-	rightCol.size = new Size(0, 0);
-	rightCol.setPadding(0, 0, 0, 0);
+	const body2_spacer = 5;
+	addForecast(body2, forecastList[0]);
+	body2.addSpacer(body2_spacer);
+	addForecast(body2, forecastList[1]);
+	body2.addSpacer(body2_spacer);
+	addForecast(body2, forecastList[2]);
+	body2.addSpacer(body2_spacer);
+	addForecast(body2, forecastList[3]);
+	body2.addSpacer(body2_spacer);
+	addForecast(body2, forecastList[4]);
 
-	if (forecast) {
-		const timeStr = formatTimeFromUnix(forecast.dt);
-		const fTemp = Math.round(forecast.main.temp);
-		const fDesc = forecast.weather[0].description;
-		const pop = forecast.pop != null ? Math.round(forecast.pop * 100) : 0;
+	widget.addSpacer(6);
+
+	// ------
+	const body3 = widget.addStack();
+	body3.layoutHorizontally();
+	body3.centerAlignContent();
+
+	body3.addSpacer();
+
+	const now = new Date();
+	const timeLine = body3.addText(`更新：${formatTime(now)}`);
+	timeLine.font = Font.systemFont(9);
+	timeLine.textColor = new Color("#dddddd");
+	timeLine.minimumScaleFactor = 0.7;
+
+	// ----
+
+	Script.setWidget(widget);
+	Script.complete();
+}
+
+async function addForecast(stack, forecast_n) {
+	let t = stack.addStack();
+	t.layoutVertically();
+	t.size = new Size(0, 0);
+	t.setPadding(0, 0, 0, 0);
+
+	if(forecast_n){
+		const timeStr = formatTimeFromUnix(forecast_n.dt);
+		const fTemp = Math.round(forecast_n.main.temp);
+		const fDesc = forecast_n.weather[0].description;
+		const pop = forecast_n.pop != null ? Math.round(forecast_n.pop * 100) : 0;
 
 		let rainAmount = 0;
-		if (forecast.rain) {
-			rainAmount = forecast.rain["3h"] ?? forecast.rain["1h"] ?? 0;
+		if (forecast_n.rain) {
+			rainAmount = forecast_n.rain["3h"] ?? forecast_n.rain["1h"] ?? 0;
 		}
 		const rainStr = rainAmount.toFixed(1);
 
-		const titleLine = rightCol.addText(`未來3小時 ~${timeStr}`);
+		const titleLine = t.addText(`${timeStr}`);
 		titleLine.font = Font.boldSystemFont(12);
 		titleLine.textColor = Color.white();
 		titleLine.minimumScaleFactor = 0.7;
 
-		const forecastLine1 = rightCol.addText(`${fTemp}°C · ${fDesc}`);
+		const forecastLine1 = t.addText(`${fTemp}°C · ${fDesc}`);
 		forecastLine1.font = Font.systemFont(11);
 		forecastLine1.textColor = Color.white();
 		forecastLine1.minimumScaleFactor = 0.7;
 
-		const forecastLine2 = rightCol.addText(
-			`降雨 ${pop}% · 雨量 ${rainStr} mm`
-		);
+		const forecastLine2 = t.addText(`☔ ${pop}%`);
 		forecastLine2.font = Font.systemFont(11);
 		forecastLine2.textColor = new Color("#add8e6");
 		forecastLine2.minimumScaleFactor = 0.7;
-	} else {
-		const noData = rightCol.addText("無法取得未來 3 小時預報");
+
+		const forecastLine3 = t.addText(`🌧 ${rainStr} mm`);
+		forecastLine3.font = Font.systemFont(11);
+		forecastLine3.textColor = new Color("#add8e6");
+		forecastLine3.minimumScaleFactor = 0.7;
+	}else{
+		const noData = t.addText("無法取得未來 3 小時預報");
 		noData.font = Font.systemFont(11);
 		noData.textColor = Color.white();
 		noData.minimumScaleFactor = 0.7;
 	}
 
-	rightCol.addSpacer(4);
-
-	const now = new Date();
-	const timeLine = rightCol.addText(`更新：${formatTime(now)}`);
-	timeLine.font = Font.systemFont(9);
-	timeLine.textColor = new Color("#dddddd");
-	timeLine.minimumScaleFactor = 0.7;
-
-	Script.setWidget(widget);
-	Script.complete();
+	return t
 }
 
 // ========= API 呼叫：目前天氣 =========
@@ -191,7 +229,7 @@ async function fetchCurrentWeather() {
 }
 
 // ========= API 呼叫：5 天 / 3 小時預報 =========
-async function fetchForecast3h() {
+async function fetchForecast() {
 	try {
 		const url =
 			`https://api.openweathermap.org/data/2.5/forecast` +
@@ -210,11 +248,11 @@ async function fetchForecast3h() {
 		}
 
 		if (json.list && json.list.length > 0) {
-			return json.list[0]; // 最近的 3 小時區間
+			return json.list; // 最近的 3 小時區間
 		}
 		return null;
 	} catch (e) {
-		console.error("fetchForecast3h Exception:", e);
+		console.error("fetchForecast Exception:", e);
 		return null;
 	}
 }
