@@ -9,6 +9,24 @@ const UNITS = "metric";             // metric = °C, imperial = °F
 const LANG = "zh_tw";               // 語系：繁中 zh_tw、英文 en
 const USE_BACKGROUND_GRADIENT = true; // 是否使用漸層背景
 
+function mapWeatherIcon(icon) {
+  const base = icon.slice(0, 2)  // 取前兩碼 01 / 02 / 03...
+  const isDay = icon.endsWith("d")
+
+  switch (base) {
+    case "01": return isDay ? "sun.max.fill" : "moon.stars.fill"
+    case "02": return isDay ? "cloud.sun.fill" : "cloud.moon.fill"
+    case "03": return "cloud.fill"
+    case "04": return "smoke.fill"
+    case "09": return "cloud.drizzle.fill"
+    case "10": return isDay ? "cloud.sun.rain.fill" : "cloud.moon.rain.fill"
+    case "11": return "cloud.bolt.rain.fill"
+    case "13": return "cloud.snow.fill"
+    case "50": return "cloud.fog.fill"
+    default: return "questionmark.circle"
+  }
+}
+
 // ========= 主程式 =========
 async function run() {
 	const widget = new ListWidget();
@@ -38,80 +56,93 @@ async function run() {
 	}
 
 	// ====== 最上方：城市 + 描述 + 大溫度（橫向，吃滿寬度） ======
-	const top = widget.addStack();
-	top.layoutHorizontally();
-	top.centerAlignContent();
+	const row1 = widget.addStack();
+	row1.layoutHorizontally();
+	row1.centerAlignContent();
 
 	// 左：城市 + 天氣描述
-	const topLeft = top.addStack();
-	topLeft.layoutVertically();
+	const row1Left1 = row1.addStack();
+	row1Left1.layoutVertically();
+	// row1Left1.centerAlignItems();
+	row1Left1.size = new Size(0, 0);
+	row1Left1.setPadding(0, 0, 0, 0);
 
-	const cityText = topLeft.addText(`${current.name} 天氣`);
+	const city = row1Left1.addStack();
+	city.layoutHorizontally();
+	city.centerAlignContent();
+	city.size = new Size(0, 0);
+	city.setPadding(0, 0, 0, 0);
+
+	const citySymbol = city.addImage(SFSymbol.named("location.fill").image);
+	citySymbol.imageSize = new Size(15,15);
+	citySymbol.tintColor = Color.white();
+
+	const cityText = city.addText(`${current.name}`);
 	cityText.font = Font.boldSystemFont(14);
 	cityText.textColor = Color.white();
-	cityText.minimumScaleFactor = 0.7;
+	
+	const weather_icon = current.weather[0].icon;
+	const symbolName = mapWeatherIcon(weather_icon)
+	const weatherSymbol = row1Left1.addImage(SFSymbol.named(symbolName).image);
+	weatherSymbol.imageSize = new Size(50,50);
 
 	const desc = current.weather[0].description;
-	const feelsLike = Math.round(current.main.feels_like);
-	const descLine = topLeft.addText(`${desc} · 體感 ${feelsLike}°`);
-	descLine.font = Font.systemFont(11);
-	descLine.textColor = Color.white();
-	descLine.minimumScaleFactor = 0.7;
+	const descText = row1Left1.addText(`${desc}`);
+	descText.font = Font.systemFont(11);
+	descText.textColor = Color.white();
+	// const feelsLike = Math.round(current.main.feels_like);
+	// const descLine = row1Left1.addText(`${desc} · 體感 ${feelsLike}°`);
+	// descLine.font = Font.systemFont(11);
+	// descLine.textColor = Color.white();
+	// descLine.minimumScaleFactor = 0.7;
 
-	top.addSpacer();
+	row1.addSpacer(1);
 
-	// 右：大字現在溫度
-	const tempNow = Math.round(current.main.temp);
-	const tempText = top.addText(`${tempNow}°`);
-	tempText.font = Font.boldSystemFont(34);
-	tempText.textColor = Color.white();
-	tempText.minimumScaleFactor = 0.6;
+	const row1Left2 = row1.addStack();
+	row1Left2.layoutVertically();
+	row1Left2.centerAlignContent();
+	row1Left2.size = new Size(0, 0);
+	row1Left2.setPadding(0, 0, 0, 0);
 
-	widget.addSpacer();
 
-	// ====== 中段：左右兩欄內容 ======
-	const body = widget.addStack();
-	body.layoutHorizontally();
-	body.centerAlignContent();
+	// 濕度
+	const humidity = row1Left2.addStack();
+	humidity.layoutHorizontally();
+	humidity.centerAlignContent();
+	humidity.size = new Size(0, 0);
+	humidity.setPadding(0, 0, 0, 0);
 
-	// ----- 左欄 -----
-	const leftCol = body.addStack();
-	leftCol.layoutVertically();
-	leftCol.size = new Size(0, 0);   // 讓 Scriptable 自動分配寬度
-	leftCol.setPadding(0, 0, 0, 0);
+	const humiditySymbol = humidity.addImage(SFSymbol.named("humidity.fill").image);
+	humiditySymbol.imageSize = new Size(15,15);
+	humiditySymbol.tintColor = Color.blue();
 
-	const tMax = Math.round(current.main.temp_max);
-	const tMin = Math.round(current.main.temp_min);
+	const humidityVal = humidity.addText(` ${current.main.humidity}%`);
+	humidityVal.font = Font.systemFont(11);
+	humidityVal.textColor = Color.white();
 
-	const hiLoLine = leftCol.addText(`今天 高 ${tMax}° / 低 ${tMin}°`);
-	hiLoLine.font = Font.systemFont(11);
-	hiLoLine.textColor = new Color("#ffeb99");
-	hiLoLine.minimumScaleFactor = 0.7;
 
-	const windSpeed = (current.wind?.speed ?? 0).toFixed(1);
-	const extraLine = leftCol.addText(
-		`💧 ${current.main.humidity}% · 🌬️ ${windSpeed} m/s`
-	);
-	extraLine.font = Font.systemFont(11);
-	extraLine.textColor = Color.white();
-	extraLine.minimumScaleFactor = 0.7;
+	// 風速
+	const windSpeed = row1Left2.addStack();
+	windSpeed.layoutHorizontally();
+	windSpeed.centerAlignContent();
+	windSpeed.size = new Size(0, 0);
+	windSpeed.setPadding(0, 0, 0, 0);
 
-	// 左右欄中間空隙
-	body.addSpacer();
+	const windSpeedSymbol = windSpeed.addImage(SFSymbol.named("wind").image);
+	windSpeedSymbol.imageSize = new Size(15,15);
+	windSpeedSymbol.tintColor = Color.white();
 
-	// ----- 右欄 -----
-	const rightCol = body.addStack();
-	rightCol.layoutVertically();
-	rightCol.size = new Size(0, 0);
-	rightCol.setPadding(0, 0, 0, 0);
+	const windSpeedVal = windSpeed.addText(` ${(current.wind?.speed ?? 0).toFixed(1)} m/s`);
+	windSpeedVal.font = Font.systemFont(11);
+	windSpeedVal.textColor = Color.white();
 
-	const sunrise = rightCol.addStack();
+	const sunrise = row1Left2.addStack();
 	sunrise.layoutHorizontally();
 	sunrise.centerAlignContent();
 	sunrise.size = new Size(0, 0);
 	sunrise.setPadding(0, 0, 0, 0);
 
-	const sunset = rightCol.addStack();
+	const sunset = row1Left2.addStack();
 	sunset.layoutHorizontally();
 	sunset.centerAlignContent();
 	sunset.size = new Size(0, 0);
@@ -141,6 +172,98 @@ async function run() {
 		sunsetTime.textColor = new Color("#ffd27f");
 	}
 
+	row1.addSpacer();
+
+	// 右：大字現在溫度
+	const row1Right = row1.addStack();
+	row1Right.layoutVertically();
+	row1Right.centerAlignContent();
+	row1Right.size = new Size(0, 0);
+	row1Right.setPadding(0, 0, 0, 0);
+
+	const tempNow = Math.round(current.main.temp);
+	const tMax = Math.round(current.main.temp_max);
+	const tMin = Math.round(current.main.temp_min);
+
+	const tempText = row1Right.addText(`${tempNow}°`);
+	tempText.font = Font.boldSystemFont(34);
+	tempText.textColor = Color.white();
+
+	const tempBarImg = provideTempBar(tempNow, tMax, tMin);
+ 	const tempBar = row1Right.addImage(tempBarImg);
+	tempBar.size = new Size(50,0);
+	
+	row1Right.addSpacer(1);
+
+	const hiloStack = row1Right.addStack();
+	hiloStack.layoutHorizontally();
+	hiloStack.centerAlignContent();
+	hiloStack.size = new Size(0, 0);
+	hiloStack.setPadding(0, 0, 0, 0);
+
+	const hiTempText = hiloStack.addText(`${tMax}°`);
+	hiTempText.font = Font.systemFont(11);
+
+	hiloStack.addSpacer(1);
+
+	const loTempText = hiloStack.addText(`${tMin}°`);
+	loTempText.font = Font.systemFont(11);
+	// hiLoLine.textColor = new Color("#ffeb99");
+
+	widget.addSpacer();
+
+	// ====== 中段：左右兩欄內容 ======
+	// const body = widget.addStack();
+	// body.layoutHorizontally();
+	// body.centerAlignContent();
+
+	// ----- 左欄 -----
+	// const leftCol = body.addStack();
+	// leftCol.layoutVertically();
+	// leftCol.size = new Size(0, 0);   // 讓 Scriptable 自動分配寬度
+	// leftCol.setPadding(0, 0, 0, 0);
+
+	// 左欄 第1列
+	// const leftColRow1 = leftCol.addStack();
+	// leftColRow1.layoutHorizontally();
+	// leftColRow1.centerAlignContent();
+	// leftColRow1.size = new Size(0, 0);
+	// leftColRow1.setPadding(0, 0, 0, 0);
+
+	// const tMax = Math.round(current.main.temp_max);
+	// const tMin = Math.round(current.main.temp_min);
+
+	// const hiLoLine = leftColRow1.addText(`今天 高 ${tMax}° / 低 ${tMin}°`);
+	// hiLoLine.font = Font.systemFont(11);
+	// hiLoLine.textColor = new Color("#ffeb99");
+
+	// 左欄 第2列
+	// const leftColRow2 = leftCol.addStack();
+	// leftColRow2.layoutHorizontally();
+	// leftColRow2.centerAlignContent();
+	// leftColRow2.size = new Size(0, 0);
+	// leftColRow2.setPadding(0, 0, 0, 0);
+
+	
+
+	// const extraLine = leftCol.addText(
+	// 	`💧 ${current.main.humidity}% · 🌬️ ${windSpeed} m/s`
+	// );
+	// extraLine.font = Font.systemFont(11);
+	// extraLine.textColor = Color.white();
+	// extraLine.minimumScaleFactor = 0.7;
+
+	// 左右欄中間空隙
+	// body.addSpacer();
+
+	// ----- 右欄 -----
+	// const rightCol = body.addStack();
+	// rightCol.layoutVertically();
+	// rightCol.size = new Size(0, 0);
+	// rightCol.setPadding(0, 0, 0, 0);
+
+	
+
 	widget.addSpacer(4);
 	// ------ 未來3小時 * 5個預測 -----
 	const body2 = widget.addStack();
@@ -157,25 +280,57 @@ async function run() {
 	body2.addSpacer();
 	addForecast(body2, forecastList[4]);
 
-	widget.addSpacer(4);
+	// widget.addSpacer(4);
 
 	// ------
-	const body3 = widget.addStack();
-	body3.layoutHorizontally();
-	body3.centerAlignContent();
+	// const body3 = widget.addStack();
+	// body3.layoutHorizontally();
+	// body3.centerAlignContent();
 
-	body3.addSpacer();
+	// body3.addSpacer();
 
-	const now = new Date();
-	const timeLine = body3.addText(`更新：${formatTime(now)}`);
-	timeLine.font = Font.systemFont(9);
-	timeLine.textColor = new Color("#dddddd");
-	timeLine.minimumScaleFactor = 0.7;
+	// const now = new Date();
+	// const timeLine = body3.addText(`更新：${formatTime(now)}`);
+	// timeLine.font = Font.systemFont(9);
+	// timeLine.textColor = new Color("#dddddd");
+	// timeLine.minimumScaleFactor = 0.7;
 
 	// ----
 
 	Script.setWidget(widget);
 	Script.complete();
+}
+
+function provideTempBar(temp, maxTemp, minTemp) {
+
+    const tempBarWidth = 200;
+    const tempBarHeight = 20;
+    // const weatherData = this.data.weather
+
+    let percent = (temp - minTemp) / (maxTemp - minTemp);
+    if (percent < 0) { percent = 0; } 
+    else if (percent > 1) { percent = 1; }
+
+    const draw = new DrawContext();
+    draw.opaque = false;
+    draw.respectScreenScale = true;
+    draw.size = new Size(tempBarWidth, tempBarHeight);
+
+    const barPath = new Path();
+    const barHeight = tempBarHeight - 10;
+    barPath.addRoundedRect(new Rect(0, 5, tempBarWidth, barHeight), barHeight / 2, barHeight / 2);
+    draw.addPath(barPath);
+
+    draw.setFillColor(new Color("#FFFFFF", 0.5));
+    draw.fillPath();
+
+    const currPath = new Path();
+    currPath.addEllipse(new Rect((tempBarWidth - tempBarHeight) * percent, 0, tempBarHeight, tempBarHeight));
+    draw.addPath(currPath);
+    draw.setFillColor(new Color("#FFFFFF", 1));
+    draw.fillPath();
+
+    return draw.getImage();
 }
 
 async function addForecast(stack, forecast_n) {
