@@ -1,5 +1,9 @@
+// Variables used by Scriptable.
+// These must be at the very top of the file. Do not edit.
+// icon-color: brown; icon-glyph: magic;
+const secrets = importModule("WeatherSecrets")
 // ========= 設定區 =========
-const API_KEY = "";
+const API_KEY = secrets.API_KEY;
 const CITY_NAME = "Taipei";         // 你的城市名稱
 const UNITS = "metric";             // metric = °C, imperial = °F
 const LANG = "zh_tw";               // 語系：繁中 zh_tw、英文 en
@@ -63,7 +67,7 @@ async function run() {
 	tempText.textColor = Color.white();
 	tempText.minimumScaleFactor = 0.6;
 
-	widget.addSpacer(6);
+	widget.addSpacer();
 
 	// ====== 中段：左右兩欄內容 ======
 	const body = widget.addStack();
@@ -86,7 +90,7 @@ async function run() {
 
 	const windSpeed = (current.wind?.speed ?? 0).toFixed(1);
 	const extraLine = leftCol.addText(
-		`濕度 ${current.main.humidity}% · 風速 ${windSpeed} m/s`
+		`💧 ${current.main.humidity}% · 🌬️ ${windSpeed} m/s`
 	);
 	extraLine.font = Font.systemFont(11);
 	extraLine.textColor = Color.white();
@@ -100,6 +104,18 @@ async function run() {
 	rightCol.layoutVertically();
 	rightCol.size = new Size(0, 0);
 	rightCol.setPadding(0, 0, 0, 0);
+
+	const sunrise = rightCol.addStack();
+	sunrise.layoutHorizontally();
+	sunrise.centerAlignContent();
+	sunrise.size = new Size(0, 0);
+	sunrise.setPadding(0, 0, 0, 0);
+
+	const sunset = rightCol.addStack();
+	sunset.layoutHorizontally();
+	sunset.centerAlignContent();
+	sunset.size = new Size(0, 0);
+	sunset.setPadding(0, 0, 0, 0);
 	
 	const sunriseUnix = current.sys?.sunrise;
 	const sunsetUnix = current.sys?.sunset;
@@ -108,35 +124,40 @@ async function run() {
 		const sunriseStr = formatTimeFromUnix(sunriseUnix);
 		const sunsetStr = formatTimeFromUnix(sunsetUnix);
 
-		const sunLine1 = rightCol.addText(`日出 ${sunriseStr}`);
-		sunLine1.font = Font.systemFont(11);
-		sunLine1.textColor = new Color("#ffd27f");
-		sunLine1.minimumScaleFactor = 0.7;
+		const sunriseSymbol = sunrise.addImage(SFSymbol.named("sunrise.fill").image);
+		sunriseSymbol.imageSize = new Size(15,15);
+		sunriseSymbol.tintColor = Color.yellow();
 
-		const sunLine2 = rightCol.addText(`日落 ${sunsetStr}`);
-		sunLine2.font = Font.systemFont(11);
-		sunLine2.textColor = new Color("#ffd27f");
-		sunLine2.minimumScaleFactor = 0.7;
+		const sunriseTime = sunrise.addText(` ${sunriseStr}`);
+		sunriseTime.font = Font.systemFont(11);
+		sunriseTime.textColor = new Color("#ffd27f");
+
+		const sunsetSymbol = sunset.addImage(SFSymbol.named("sunset.fill").image);
+		sunsetSymbol.imageSize = new Size(15,15);
+		sunsetSymbol.tintColor = Color.yellow();
+
+		const sunsetTime = sunset.addText(` ${sunsetStr}`);
+		sunsetTime.font = Font.systemFont(11);
+		sunsetTime.textColor = new Color("#ffd27f");
 	}
 
-	widget.addSpacer(6);
-	// ------
+	widget.addSpacer(4);
+	// ------ 未來3小時 * 5個預測 -----
 	const body2 = widget.addStack();
 	body2.layoutHorizontally();
 	body2.centerAlignContent();
 
-	const body2_spacer = 5;
 	addForecast(body2, forecastList[0]);
-	body2.addSpacer(body2_spacer);
+	body2.addSpacer();
 	addForecast(body2, forecastList[1]);
-	body2.addSpacer(body2_spacer);
+	body2.addSpacer();
 	addForecast(body2, forecastList[2]);
-	body2.addSpacer(body2_spacer);
+	body2.addSpacer();
 	addForecast(body2, forecastList[3]);
-	body2.addSpacer(body2_spacer);
+	body2.addSpacer();
 	addForecast(body2, forecastList[4]);
 
-	widget.addSpacer(6);
+	widget.addSpacer(4);
 
 	// ------
 	const body3 = widget.addStack();
@@ -202,6 +223,13 @@ async function addForecast(stack, forecast_n) {
 	}
 
 	return t
+}
+
+async function divider(stack, width) {
+	let divider = stack.addStack();
+	divider.size = new Size(width, 0);   // 寬 1pt，高度自動撐滿
+	divider.backgroundColor = new Color("#cccccc");
+	divider.cornerRadius = 1;
 }
 
 // ========= API 呼叫：目前天氣 =========
