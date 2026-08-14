@@ -1,13 +1,40 @@
 // Variables used by Scriptable.
 // These must be at the very top of the file. Do not edit.
-// icon-color: brown; icon-glyph: magic;
+// icon-color: deep-green; icon-glyph: magic;
 const secrets = importModule("WeatherSecrets")
+
 // ========= 設定區 =========
 const API_KEY = secrets.API_KEY;
 const CITY_NAME = "Taipei";         // 你的城市名稱
 const UNITS = "metric";             // metric = °C, imperial = °F
 const LANG = "zh_tw";               // 語系：繁中 zh_tw、英文 en
 const USE_BACKGROUND_GRADIENT = true; // 是否使用漸層背景
+
+const fm = FileManager.local();
+const CACHE_FILE = fm.joinPath(fm.documentsDirectory(), "weather-cache.json");
+
+// 只保存完整且成功取得的天氣資料，供鎖屏網路不穩時備援。
+function saveWeatherCache(current, forecast) {
+	try {
+		fm.writeString(CACHE_FILE, JSON.stringify({
+			updatedAt: Date.now(),
+			current,
+			forecast
+		}));
+	} catch (error) {
+		console.error(`寫入快取失敗：${error}`);
+	}
+}
+
+function loadWeatherCache() {
+	try {
+		if (!fm.fileExists(CACHE_FILE)) return null;
+		return JSON.parse(fm.readString(CACHE_FILE));
+	} catch (error) {
+		console.error(`讀取快取失敗：${error}`);
+		return null;
+	}
+}
 
 function mapWeatherIcon(icon) {
 	const base = icon.slice(0, 2)  // 取前兩碼 01 / 02 / 03...
@@ -32,20 +59,7 @@ async function run() {
 	const widget = new ListWidget();
 	widget.setPadding(10, 12, 10, 12);
 
-	const [current, forecastList] = await Promise.all([
-		fetchCurrentWeather(),
-		fetchForecast()
-	]);
-
-	if (!current) {
-		const t = widget.addText("載入目前天氣失敗");
-		t.textColor = Color.white();
-		Script.setWidget(widget);
-		Script.complete();
-		return;
-	}
-
-	// 背景
+	// 必須在網路請求前設定，確保失敗訊息在鎖屏上仍清楚可見。
 	if (USE_BACKGROUND_GRADIENT) {
 		const gradient = new LinearGradient();
 		gradient.colors = [new Color("#1e3c72"), new Color("#2a5298")];
@@ -53,6 +67,36 @@ async function run() {
 		widget.backgroundGradient = gradient;
 	} else {
 		widget.backgroundColor = new Color("#1e1e1e");
+	}
+	widget.refreshAfterDate = new Date(Date.now() + 30 * 60 * 1000);
+
+	let [current, forecastResult] = await Promise.all([
+		fetchCurrentWeather(),
+		fetchForecast()
+	]);
+
+	const liveCurrent = current;
+	const liveForecast = forecastResult;
+	const cache = loadWeatherCache();
+
+	// 網路失敗時個別回退到上次成功資料，且預報永遠正規化為陣列。
+	if (!current) current = cache?.current ?? null;
+	if (!Array.isArray(forecastResult)) {
+		forecastResult = cache?.forecast ?? [];
+	}
+	const forecastList = Array.isArray(forecastResult) ? forecastResult : [];
+
+	// 兩個即時請求都成功才更新快取，避免以不完整資料覆蓋舊快取。
+	if (liveCurrent && Array.isArray(liveForecast) && liveForecast.length > 0) {
+		saveWeatherCache(liveCurrent, liveForecast);
+	}
+
+	if (!current) {
+		const t = widget.addText("暫時無法取得天氣");
+		t.textColor = Color.white();
+		Script.setWidget(widget);
+		Script.complete();
+		return;
 	}
 
 	// ====== 最上方：城市 + 描述 + 大溫度（橫向，吃滿寬度） ======
@@ -274,15 +318,16 @@ async function run() {
 	body2.layoutHorizontally();
 	body2.centerAlignContent();
 
-	addForecast(body2, forecastList[0]);
-	body2.addSpacer();
-	addForecast(body2, forecastList[1]);
-	body2.addSpacer();
-	addForecast(body2, forecastList[2]);
-	body2.addSpacer();
-	addForecast(body2, forecastList[3]);
-	body2.addSpacer();
-	addForecast(body2, forecastList[4]);
+	if (forecastList.length > 0) {
+		for (let i = 0; i < Math.min(5, forecastList.length); i++) {
+			if (i > 0) body2.addSpacer();
+			addForecast(body2, forecastList[i]);
+		}
+	} else {
+		const noForecast = body2.addText("暫時無法取得預報");
+		noForecast.font = Font.systemFont(11);
+		noForecast.textColor = Color.white();
+	}
 
 	// widget.addSpacer(4);
 
