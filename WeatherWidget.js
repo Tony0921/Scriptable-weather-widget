@@ -10,21 +10,21 @@ const LANG = "zh_tw";               // 語系：繁中 zh_tw、英文 en
 const USE_BACKGROUND_GRADIENT = true; // 是否使用漸層背景
 
 function mapWeatherIcon(icon) {
-  const base = icon.slice(0, 2)  // 取前兩碼 01 / 02 / 03...
-  const isDay = icon.endsWith("d")
+	const base = icon.slice(0, 2)  // 取前兩碼 01 / 02 / 03...
+	const isDay = icon.endsWith("d")
 
-  switch (base) {
-    case "01": return isDay ? "sun.max.fill" : "moon.stars.fill"
-    case "02": return isDay ? "cloud.sun.fill" : "cloud.moon.fill"
-    case "03": return "cloud.fill"
-    case "04": return "smoke.fill"
-    case "09": return "cloud.drizzle.fill"
-    case "10": return isDay ? "cloud.sun.rain.fill" : "cloud.moon.rain.fill"
-    case "11": return "cloud.bolt.rain.fill"
-    case "13": return "cloud.snow.fill"
-    case "50": return "cloud.fog.fill"
-    default: return "questionmark.circle"
-  }
+	switch (base) {
+		case "01": return isDay ? "sun.max.fill" : "moon.stars.fill"
+		case "02": return isDay ? "cloud.sun.fill" : "cloud.moon.fill"
+		case "03": return "cloud.fill"
+		case "04": return "smoke.fill"
+		case "09": return "cloud.drizzle.fill"
+		case "10": return isDay ? "cloud.sun.rain.fill" : "cloud.moon.rain.fill"
+		case "11": return "cloud.bolt.rain.fill"
+		case "13": return "cloud.snow.fill"
+		case "50": return "cloud.fog.fill"
+		default: return "questionmark.circle"
+	}
 }
 
 // ========= 主程式 =========
@@ -73,30 +73,34 @@ async function run() {
 	city.size = new Size(0, 0);
 	city.setPadding(0, 0, 0, 0);
 
-	const citySymbol = city.addImage(SFSymbol.named("location.fill").image);
-	citySymbol.imageSize = new Size(15,15);
+	const locSymbol = SFSymbol.named("location.fill");
+	locSymbol.applyFont(Font.systemFont(15));
+	const citySymbol = city.addImage(locSymbol.image);
+	citySymbol.imageSize = new Size(15, 15);
 	citySymbol.tintColor = Color.white();
 
 	const cityText = city.addText(`${current.name}`);
 	cityText.font = Font.boldSystemFont(14);
 	cityText.textColor = Color.white();
-	
-	const weather_icon = current.weather[0].icon;
-	const symbolName = mapWeatherIcon(weather_icon)
-	const weatherSymbol = row1Left1.addImage(SFSymbol.named(symbolName).image);
-	weatherSymbol.imageSize = new Size(50,50);
 
-	const desc = current.weather[0].description;
-	const descText = row1Left1.addText(`${desc}`);
-	descText.font = Font.systemFont(11);
-	descText.textColor = Color.white();
+	// const weather_icon = ;
+	// const weatherSymbolName = ;
+	const weatherSymbol = SFSymbol.named(mapWeatherIcon(current.weather[0].icon));
+	weatherSymbol.applyFont(Font.systemFont(50));
+	const weatherSymbolImg = row1Left1.addImage(weatherSymbol.image);
+	weatherSymbolImg.imageSize = new Size(50, 50);
+
+	// const desc = current.weather[0].description;
+	// const descText = row1Left1.addText(`${desc}`);
+	// descText.font = Font.systemFont(11);
+	// descText.textColor = Color.white();
 	// const feelsLike = Math.round(current.main.feels_like);
 	// const descLine = row1Left1.addText(`${desc} · 體感 ${feelsLike}°`);
 	// descLine.font = Font.systemFont(11);
 	// descLine.textColor = Color.white();
 	// descLine.minimumScaleFactor = 0.7;
 
-	row1.addSpacer(1);
+	row1.addSpacer(5);
 
 	const row1Left2 = row1.addStack();
 	row1Left2.layoutVertically();
@@ -113,7 +117,7 @@ async function run() {
 	humidity.setPadding(0, 0, 0, 0);
 
 	const humiditySymbol = humidity.addImage(SFSymbol.named("humidity.fill").image);
-	humiditySymbol.imageSize = new Size(15,15);
+	humiditySymbol.imageSize = new Size(15, 15);
 	humiditySymbol.tintColor = Color.blue();
 
 	const humidityVal = humidity.addText(` ${current.main.humidity}%`);
@@ -129,7 +133,7 @@ async function run() {
 	windSpeed.setPadding(0, 0, 0, 0);
 
 	const windSpeedSymbol = windSpeed.addImage(SFSymbol.named("wind").image);
-	windSpeedSymbol.imageSize = new Size(15,15);
+	windSpeedSymbol.imageSize = new Size(15, 15);
 	windSpeedSymbol.tintColor = Color.white();
 
 	const windSpeedVal = windSpeed.addText(` ${(current.wind?.speed ?? 0).toFixed(1)} m/s`);
@@ -147,7 +151,7 @@ async function run() {
 	sunset.centerAlignContent();
 	sunset.size = new Size(0, 0);
 	sunset.setPadding(0, 0, 0, 0);
-	
+
 	const sunriseUnix = current.sys?.sunrise;
 	const sunsetUnix = current.sys?.sunset;
 
@@ -156,7 +160,7 @@ async function run() {
 		const sunsetStr = formatTimeFromUnix(sunsetUnix);
 
 		const sunriseSymbol = sunrise.addImage(SFSymbol.named("sunrise.fill").image);
-		sunriseSymbol.imageSize = new Size(15,15);
+		sunriseSymbol.imageSize = new Size(15, 15);
 		sunriseSymbol.tintColor = Color.yellow();
 
 		const sunriseTime = sunrise.addText(` ${sunriseStr}`);
@@ -164,7 +168,7 @@ async function run() {
 		sunriseTime.textColor = new Color("#ffd27f");
 
 		const sunsetSymbol = sunset.addImage(SFSymbol.named("sunset.fill").image);
-		sunsetSymbol.imageSize = new Size(15,15);
+		sunsetSymbol.imageSize = new Size(15, 15);
 		sunsetSymbol.tintColor = Color.yellow();
 
 		const sunsetTime = sunset.addText(` ${sunsetStr}`);
@@ -190,10 +194,10 @@ async function run() {
 	tempText.textColor = Color.white();
 
 	const tempBarImg = provideTempBar(tempNow, tMax, tMin);
- 	const tempBar = row1Right.addImage(tempBarImg);
-	tempBar.size = new Size(50,0);
-	
-	row1Right.addSpacer(1);
+	const tempBar = row1Right.addImage(tempBarImg);
+	tempBar.imageSize = new Size(50, 5);
+
+	row1Right.addSpacer(3);
 
 	const hiloStack = row1Right.addStack();
 	hiloStack.layoutHorizontally();
@@ -201,13 +205,13 @@ async function run() {
 	hiloStack.size = new Size(0, 0);
 	hiloStack.setPadding(0, 0, 0, 0);
 
-	const hiTempText = hiloStack.addText(`${tMax}°`);
-	hiTempText.font = Font.systemFont(11);
-
-	hiloStack.addSpacer(1);
-
 	const loTempText = hiloStack.addText(`${tMin}°`);
 	loTempText.font = Font.systemFont(11);
+
+	hiloStack.addSpacer(20);
+
+	const hiTempText = hiloStack.addText(`${tMax}°`);
+	hiTempText.font = Font.systemFont(11);
 	// hiLoLine.textColor = new Color("#ffeb99");
 
 	widget.addSpacer();
@@ -244,7 +248,7 @@ async function run() {
 	// leftColRow2.size = new Size(0, 0);
 	// leftColRow2.setPadding(0, 0, 0, 0);
 
-	
+
 
 	// const extraLine = leftCol.addText(
 	// 	`💧 ${current.main.humidity}% · 🌬️ ${windSpeed} m/s`
@@ -262,7 +266,7 @@ async function run() {
 	// rightCol.size = new Size(0, 0);
 	// rightCol.setPadding(0, 0, 0, 0);
 
-	
+
 
 	widget.addSpacer(4);
 	// ------ 未來3小時 * 5個預測 -----
@@ -303,34 +307,35 @@ async function run() {
 
 function provideTempBar(temp, maxTemp, minTemp) {
 
-    const tempBarWidth = 200;
-    const tempBarHeight = 20;
-    // const weatherData = this.data.weather
+	const tempBarWidth = 200;
+	const tempBarHeight = 20;
+	// const weatherData = this.data.weather
 
-    let percent = (temp - minTemp) / (maxTemp - minTemp);
-    if (percent < 0) { percent = 0; } 
-    else if (percent > 1) { percent = 1; }
+	let percent = (temp - minTemp) / (maxTemp - minTemp);
+	if (percent < 0) { percent = 0; }
+	else if (percent > 1) { percent = 1; }
 
-    const draw = new DrawContext();
-    draw.opaque = false;
-    draw.respectScreenScale = true;
-    draw.size = new Size(tempBarWidth, tempBarHeight);
+	const draw = new DrawContext();
+	draw.opaque = false;
+	draw.respectScreenScale = true;
+	draw.size = new Size(tempBarWidth, tempBarHeight);
 
-    const barPath = new Path();
-    const barHeight = tempBarHeight - 10;
-    barPath.addRoundedRect(new Rect(0, 5, tempBarWidth, barHeight), barHeight / 2, barHeight / 2);
-    draw.addPath(barPath);
+	const barPath = new Path();
+	const barHeight = tempBarHeight / 2;
+	const barY = (tempBarHeight - barHeight) / 2;
+	barPath.addRoundedRect(new Rect(0, barY, tempBarWidth, barHeight), barHeight / 2, barHeight / 2);
+	draw.addPath(barPath);
 
-    draw.setFillColor(new Color("#FFFFFF", 0.5));
-    draw.fillPath();
+	draw.setFillColor(new Color("#FFFFFF", 0.5));
+	draw.fillPath();
 
-    const currPath = new Path();
-    currPath.addEllipse(new Rect((tempBarWidth - tempBarHeight) * percent, 0, tempBarHeight, tempBarHeight));
-    draw.addPath(currPath);
-    draw.setFillColor(new Color("#FFFFFF", 1));
-    draw.fillPath();
+	const currPath = new Path();
+	currPath.addEllipse(new Rect((tempBarWidth - tempBarHeight) * percent, 0, tempBarHeight, tempBarHeight));
+	draw.addPath(currPath);
+	draw.setFillColor(new Color("#FFFFFF", 1));
+	draw.fillPath();
 
-    return draw.getImage();
+	return draw.getImage();
 }
 
 async function addForecast(stack, forecast_n) {
@@ -339,10 +344,11 @@ async function addForecast(stack, forecast_n) {
 	t.size = new Size(0, 0);
 	t.setPadding(0, 0, 0, 0);
 
-	if(forecast_n){
+	if (forecast_n) {
 		const timeStr = formatTimeFromUnix(forecast_n.dt);
 		const fTemp = Math.round(forecast_n.main.temp);
 		const fDesc = forecast_n.weather[0].description;
+		const fIcon = forecast_n.weather[0].icon;
 		const pop = forecast_n.pop != null ? Math.round(forecast_n.pop * 100) : 0;
 
 		let rainAmount = 0;
@@ -351,15 +357,42 @@ async function addForecast(stack, forecast_n) {
 		}
 		const rainStr = rainAmount.toFixed(1);
 
-		const titleLine = t.addText(`${timeStr}`);
+
+
+		let fRow1 = t.addStack();
+		fRow1.layoutHorizontally();
+		fRow1.centerAlignContent();
+		fRow1.size = new Size(0, 0);
+		fRow1.setPadding(0, 0, 0, 0);
+
+		fRow1.addSpacer();
+		const titleLine = fRow1.addText(`${timeStr}`);
 		titleLine.font = Font.boldSystemFont(12);
 		titleLine.textColor = Color.white();
 		titleLine.minimumScaleFactor = 0.7;
+		fRow1.addSpacer();
 
-		const forecastLine1 = t.addText(`${fTemp}°C · ${fDesc}`);
-		forecastLine1.font = Font.systemFont(11);
-		forecastLine1.textColor = Color.white();
-		forecastLine1.minimumScaleFactor = 0.7;
+		let fRow2 = t.addStack();
+		fRow2.layoutHorizontally();
+		fRow2.centerAlignContent();
+		fRow2.size = new Size(0, 0);
+		fRow2.setPadding(0, 0, 0, 0);
+
+		fRow2.addSpacer();
+		// const fWeather_icon = 
+		// const fWeatherSymbolName = 
+		const fWeatherSymbol = SFSymbol.named(mapWeatherIcon(fIcon));
+		fWeatherSymbol.applyFont(Font.systemFont(20));
+		const fWeatherSymbolImg = fRow2.addImage(fWeatherSymbol.image);
+		fWeatherSymbolImg.imageSize = new Size(20, 20);
+		fRow2.addSpacer();
+
+
+
+		// const forecastLine1 = t.addText(`${fTemp}°C · ${fDesc}`);
+		// forecastLine1.font = Font.systemFont(11);
+		// forecastLine1.textColor = Color.white();
+		// forecastLine1.minimumScaleFactor = 0.7;
 
 		const forecastLine2 = t.addText(`☔ ${pop}%`);
 		forecastLine2.font = Font.systemFont(11);
@@ -370,7 +403,7 @@ async function addForecast(stack, forecast_n) {
 		forecastLine3.font = Font.systemFont(11);
 		forecastLine3.textColor = new Color("#add8e6");
 		forecastLine3.minimumScaleFactor = 0.7;
-	}else{
+	} else {
 		const noData = t.addText("無法取得未來 3 小時預報");
 		noData.font = Font.systemFont(11);
 		noData.textColor = Color.white();
