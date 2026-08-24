@@ -1,6 +1,6 @@
 // Variables used by Scriptable.
 // These must be at the very top of the file. Do not edit.
-// icon-color: deep-green; icon-glyph: magic;
+// icon-color: blue; icon-glyph: cloud;
 const secrets = importModule("WeatherSecrets")
 
 // ========= 設定區 =========
@@ -12,6 +12,9 @@ const USE_BACKGROUND_GRADIENT = true; // 是否使用漸層背景
 
 const fm = FileManager.local();
 const CACHE_FILE = fm.joinPath(fm.documentsDirectory(), "weather-cache.json");
+
+const TIME_TEXT_SIZE = 12;
+const DATA_TEXT_SIZE = 10;
 
 // 只保存完整且成功取得的天氣資料，供鎖屏網路不穩時備援。
 function saveWeatherCache(current, forecast) {
@@ -127,8 +130,6 @@ async function run() {
 	cityText.font = Font.boldSystemFont(14);
 	cityText.textColor = Color.white();
 
-	// const weather_icon = ;
-	// const weatherSymbolName = ;
 	const weatherSymbol = SFSymbol.named(mapWeatherIcon(current.weather[0].icon));
 	weatherSymbol.applyFont(Font.systemFont(50));
 	const weatherSymbolImg = row1Left1.addImage(weatherSymbol.image);
@@ -312,15 +313,19 @@ async function run() {
 
 
 
-	widget.addSpacer(4);
+	// widget.addSpacer(2);
 	// ------ 未來3小時 * 5個預測 -----
 	const body2 = widget.addStack();
 	body2.layoutHorizontally();
 	body2.centerAlignContent();
+	body2.size = new Size(0, 0);
+	body2.setPadding(0, 0, 0, 0);
+	body2.spacing = 0
 
 	if (forecastList.length > 0) {
-		for (let i = 0; i < Math.min(5, forecastList.length); i++) {
-			if (i > 0) body2.addSpacer();
+		addForecastIcon(body2);
+		for (let i = 0; i < Math.min(8, forecastList.length); i++) {
+			// if (i > 0) body2.addSpacer();
 			addForecast(body2, forecastList[i]);
 		}
 	} else {
@@ -383,18 +388,115 @@ function provideTempBar(temp, maxTemp, minTemp) {
 	return draw.getImage();
 }
 
-async function addForecast(stack, forecast_n) {
+async function addForecastIcon(stack) {
+	let SYMBOL_SIZE = 10;
+	let IMG_WITH = 10;
+	let IMG_HIGHT = 10;
+
 	let t = stack.addStack();
 	t.layoutVertically();
 	t.size = new Size(0, 0);
 	t.setPadding(0, 0, 0, 0);
 
+	let fRow1 = t.addStack();
+	fRow1.layoutHorizontally();
+	fRow1.centerAlignContent();
+	fRow1.size = new Size(0, 0);
+	fRow1.setPadding(0, 0, 0, 0);
+
+	fRow1.addSpacer();
+	const fTimeIcon = SFSymbol.named("clock");
+	fTimeIcon.applyFont(Font.systemFont(SYMBOL_SIZE));
+	const fTimeIconImg = fRow1.addImage(fTimeIcon.image);
+	fTimeIconImg.imageSize = new Size(IMG_WITH, IMG_HIGHT);
+	fTimeIconImg.tintColor = Color.yellow();
+	fRow1.addSpacer();
+
+	let fRow2 = t.addStack();
+	fRow2.layoutHorizontally();
+	fRow2.centerAlignContent();
+	fRow2.size = new Size(0, 0);
+	fRow2.setPadding(0, 0, 0, 0);
+
+	fRow2.addSpacer();
+	const fWeatherSymbol = SFSymbol.named("smoke");
+	fWeatherSymbol.applyFont(Font.systemFont(20));
+	const fWeatherSymbolImg = fRow2.addImage(fWeatherSymbol.image);
+	fWeatherSymbolImg.imageSize = new Size(20, 20);
+	fWeatherSymbolImg.tintColor = Color.blue();
+	fRow2.addSpacer();
+
+	let fRow3 = t.addStack();
+	fRow3.layoutHorizontally();
+	fRow3.centerAlignContent();
+	fRow3.size = new Size(0, 0);
+	fRow3.setPadding(0, 0, 0, 0);
+
+	fRow3.addSpacer();
+	const fTempIcon = SFSymbol.named("thermometer");
+	fTempIcon.applyFont(Font.systemFont(SYMBOL_SIZE));
+	const fTempIconImg = fRow3.addImage(fTempIcon.image);
+	fTempIconImg.imageSize = new Size(IMG_WITH, IMG_HIGHT);
+	fTempIconImg.tintColor = Color.white();
+	fRow3.addSpacer();
+
+	let fRow4 = t.addStack();
+	fRow4.layoutHorizontally();
+	fRow4.centerAlignContent();
+	fRow4.size = new Size(0, 0);
+	fRow4.setPadding(0, 0, 0, 0);
+
+	fRow4.addSpacer();
+	const fPopIcon = SFSymbol.named("umbrella");
+	fPopIcon.applyFont(Font.systemFont(SYMBOL_SIZE));
+	const fPopIconImg = fRow4.addImage(fPopIcon.image);
+	fPopIconImg.imageSize = new Size(IMG_WITH, IMG_HIGHT);
+	fPopIconImg.tintColor = Color.white();
+	fRow4.addSpacer();
+
+	let fRow5 = t.addStack();
+	fRow5.layoutHorizontally();
+	fRow5.centerAlignContent();
+	fRow5.size = new Size(0, 0);
+	fRow5.setPadding(0, 0, 0, 0);
+
+	fRow5.addSpacer();
+	const fRainIcon = SFSymbol.named("cloud.drizzle");
+	fRainIcon.applyFont(Font.systemFont(SYMBOL_SIZE));
+	const fRainIconImg = fRow5.addImage(fRainIcon.image);
+	fRainIconImg.imageSize = new Size(IMG_WITH, IMG_HIGHT);
+	fRainIconImg.tintColor = Color.white();
+	fRow5.addSpacer();
+
+	let fRow6 = t.addStack();
+	fRow6.layoutHorizontally();
+	fRow6.centerAlignContent();
+	fRow6.size = new Size(0, 0);
+	fRow6.setPadding(0, 0, 0, 0);
+
+	fRow6.addSpacer();
+	const fWindIcon = SFSymbol.named("wind");
+	fWindIcon.applyFont(Font.systemFont(SYMBOL_SIZE));
+	const fWindIconImg = fRow6.addImage(fWindIcon.image);
+	fWindIconImg.imageSize = new Size(IMG_WITH, IMG_HIGHT);
+	fWindIconImg.tintColor = Color.white();
+	fRow6.addSpacer();
+}
+
+async function addForecast(stack, forecast_n) {
+	let t = stack.addStack();
+	t.layoutVertically();
+	t.size = new Size(0, 0);
+	t.setPadding(0, 0, 0, 0);
+	// t.backgroundColor = new Color("#AAAAAA");
+
 	if (forecast_n) {
-		const timeStr = formatTimeFromUnix(forecast_n.dt);
+		const timeStr = getHoursFromUnix(forecast_n.dt);
 		const fTemp = Math.round(forecast_n.main.temp);
 		const fDesc = forecast_n.weather[0].description;
 		const fIcon = forecast_n.weather[0].icon;
 		const pop = forecast_n.pop != null ? Math.round(forecast_n.pop * 100) : 0;
+		const fWind = (forecast_n.wind?.speed ?? 0).toFixed(1)
 
 		let rainAmount = 0;
 		if (forecast_n.rain) {
@@ -402,17 +504,17 @@ async function addForecast(stack, forecast_n) {
 		}
 		const rainStr = rainAmount.toFixed(1);
 
-
-
 		let fRow1 = t.addStack();
 		fRow1.layoutHorizontally();
 		fRow1.centerAlignContent();
 		fRow1.size = new Size(0, 0);
 		fRow1.setPadding(0, 0, 0, 0);
+		fRow1.spacing = 0
+		// fRow1.backgroundColor = new Color("#AAAAAA");
 
 		fRow1.addSpacer();
 		const titleLine = fRow1.addText(`${timeStr}`);
-		titleLine.font = Font.boldSystemFont(12);
+		titleLine.font = Font.boldSystemFont(TIME_TEXT_SIZE);
 		titleLine.textColor = Color.white();
 		titleLine.minimumScaleFactor = 0.7;
 		fRow1.addSpacer();
@@ -422,32 +524,70 @@ async function addForecast(stack, forecast_n) {
 		fRow2.centerAlignContent();
 		fRow2.size = new Size(0, 0);
 		fRow2.setPadding(0, 0, 0, 0);
+		fRow2.spacing = 0
 
 		fRow2.addSpacer();
-		// const fWeather_icon = 
-		// const fWeatherSymbolName = 
 		const fWeatherSymbol = SFSymbol.named(mapWeatherIcon(fIcon));
 		fWeatherSymbol.applyFont(Font.systemFont(20));
 		const fWeatherSymbolImg = fRow2.addImage(fWeatherSymbol.image);
 		fWeatherSymbolImg.imageSize = new Size(20, 20);
 		fRow2.addSpacer();
 
+		let fRow3 = t.addStack();
+		fRow3.layoutHorizontally();
+		fRow3.centerAlignContent();
+		fRow3.size = new Size(0, 0);
+		fRow3.setPadding(0, 0, 0, 0);
+		fRow3.spacing = 0
 
+		fRow3.addSpacer(null);
+		const forecastTemp = fRow3.addText(`${fTemp}°`);
+		forecastTemp.font = Font.systemFont(DATA_TEXT_SIZE);
+		forecastTemp.textColor = Color.white();
+		forecastTemp.minimumScaleFactor = 0.7;
+		fRow3.addSpacer(null);
 
-		// const forecastLine1 = t.addText(`${fTemp}°C · ${fDesc}`);
-		// forecastLine1.font = Font.systemFont(11);
-		// forecastLine1.textColor = Color.white();
-		// forecastLine1.minimumScaleFactor = 0.7;
+		let fRow4 = t.addStack();
+		fRow4.layoutHorizontally();
+		fRow4.centerAlignContent();
+		fRow4.size = new Size(0, 0);
+		fRow4.setPadding(0, 0, 0, 0);
+		fRow4.spacing = 0
 
-		const forecastLine2 = t.addText(`☔ ${pop}%`);
-		forecastLine2.font = Font.systemFont(11);
-		forecastLine2.textColor = new Color("#add8e6");
-		forecastLine2.minimumScaleFactor = 0.7;
+		fRow4.addSpacer(null);
+		const forecastPop = fRow4.addText(`${pop}`);
+		forecastPop.font = Font.systemFont(DATA_TEXT_SIZE);
+		forecastPop.textColor = new Color("#add8e6");
+		forecastPop.minimumScaleFactor = 0.7;
+		fRow4.addSpacer(null);
 
-		const forecastLine3 = t.addText(`🌧 ${rainStr} mm`);
-		forecastLine3.font = Font.systemFont(11);
-		forecastLine3.textColor = new Color("#add8e6");
-		forecastLine3.minimumScaleFactor = 0.7;
+		let fRow5 = t.addStack();
+		fRow5.layoutHorizontally();
+		fRow5.centerAlignContent();
+		fRow5.size = new Size(0, 0);
+		fRow5.setPadding(0, 0, 0, 0);
+		fRow5.spacing = 0
+
+		fRow5.addSpacer(null);
+		const forecastRain = fRow5.addText(rainStr == 0 ? " " : rainStr.toString());
+		forecastRain.font = Font.systemFont(DATA_TEXT_SIZE);
+		forecastRain.textColor = new Color("#add8e6");
+		forecastRain.minimumScaleFactor = 0.7;
+		fRow5.addSpacer(null);
+
+		let fRow6 = t.addStack();
+		fRow6.layoutHorizontally();
+		fRow6.centerAlignContent();
+		fRow6.size = new Size(0, 0);
+		fRow6.setPadding(0, 0, 0, 0);
+		fRow6.spacing = 0
+
+		fRow6.addSpacer(null);
+		const forecastWind = fRow6.addText(`${fWind}`);
+		forecastWind.font = Font.systemFont(DATA_TEXT_SIZE);
+		forecastWind.textColor = new Color("#add8e6");
+		forecastWind.minimumScaleFactor = 0.7;
+		fRow6.addSpacer(null);
 	} else {
 		const noData = t.addText("無法取得未來 3 小時預報");
 		noData.font = Font.systemFont(11);
@@ -532,5 +672,10 @@ function formatTimeFromUnix(unix) {
 	return `${h}:${m}`;
 }
 
+function getHoursFromUnix(unix) {
+	const d = new Date(unix * 1000);
+	const h = d.getHours().toString().padStart(2, "0");
+	return `${h}`;
+}
 // ========= 執行 =========
 await run();
