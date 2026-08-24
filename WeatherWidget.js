@@ -5,7 +5,6 @@ const secrets = importModule("WeatherSecrets")
 
 // ========= 設定區 =========
 const API_KEY = secrets.API_KEY;
-const CITY_NAME = "Taipei";         // 你的城市名稱
 const UNITS = "metric";             // metric = °C, imperial = °F
 const LANG = "zh_tw";               // 語系：繁中 zh_tw、英文 en
 const USE_BACKGROUND_GRADIENT = true; // 是否使用漸層背景
@@ -17,15 +16,44 @@ const TIME_TEXT_SIZE = 12;
 const DATA_TEXT_SIZE = 10;
 
 // 只保存完整且成功取得的天氣資料，供鎖屏網路不穩時備援。
-function saveWeatherCache(current, forecast) {
+function saveWeatherCache(current, forecast, displayName) {
 	try {
 		fm.writeString(CACHE_FILE, JSON.stringify({
 			updatedAt: Date.now(),
 			current,
-			forecast
+			forecast,
+			displayName
 		}));
 	} catch (error) {
 		console.error(`寫入快取失敗：${error}`);
+	}
+}
+
+async function getCurrentLocation() {
+	try {
+		// 天氣查詢不需要 GPS 等級精度，100 公尺精度可加快定位並減少耗電。
+		Location.setAccuracyToHundredMeters();
+		return await Location.current();
+	} catch (error) {
+		console.error(`取得目前位置失敗：${error}`);
+		return null;
+	}
+}
+
+async function getDisplayName(latitude, longitude) {
+	try {
+		// 使用 Apple 反向地理編碼，地名只顯示到縣市層級，不加入里等次行政區。
+		const places = await Location.reverseGeocode(latitude, longitude, "zh_TW");
+		const place = places?.[0] ?? {};
+		const parts = [
+			place.administrativeArea,
+			place.locality
+		].filter(Boolean);
+
+		return [...new Set(parts)].join(" ") || place.name || null;
+	} catch (error) {
+		console.error(`反向地理編碼失敗：${error}`);
+		return null;
 	}
 }
 
@@ -73,17 +101,34 @@ async function run() {
 	}
 	widget.refreshAfterDate = new Date(Date.now() + 30 * 60 * 1000);
 
-	let [current, forecastResult] = await Promise.all([
-		fetchCurrentWeather(),
-		fetchForecast()
-	]);
+	const location = await getCurrentLocation();
+	let current = null;
+	let forecastResult = null;
+	let displayName = null;
+
+	if (location) {
+		const { latitude, longitude } = location;
+		// 地名、目前天氣與預報互不依賴，同時查詢可縮短小工具更新時間。
+		[displayName, current, forecastResult] = await Promise.all([
+			getDisplayName(latitude, longitude),
+			fetchCurrentWeather(latitude, longitude),
+			fetchForecast(latitude, longitude)
+		]);
+	}
 
 	const liveCurrent = current;
 	const liveForecast = forecastResult;
+	const liveDisplayName = displayName;
 	const cache = loadWeatherCache();
 
 	// 網路失敗時個別回退到上次成功資料，且預報永遠正規化為陣列。
-	if (!current) current = cache?.current ?? null;
+	if (!current) {
+		current = cache?.current ?? null;
+		displayName = cache?.displayName ?? null;
+	} else if (!displayName) {
+		// 定位天氣成功但地名解析失敗時，以 OpenWeather 地名代替，避免誤用舊位置名稱。
+		displayName = current.name ?? null;
+	}
 	if (!Array.isArray(forecastResult)) {
 		forecastResult = cache?.forecast ?? [];
 	}
@@ -91,7 +136,7 @@ async function run() {
 
 	// 兩個即時請求都成功才更新快取，避免以不完整資料覆蓋舊快取。
 	if (liveCurrent && Array.isArray(liveForecast) && liveForecast.length > 0) {
-		saveWeatherCache(liveCurrent, liveForecast);
+		saveWeatherCache(liveCurrent, liveForecast, liveDisplayName || liveCurrent.name || null);
 	}
 
 	if (!current) {
@@ -102,64 +147,57 @@ async function run() {
 		return;
 	}
 
+	const body1 = widget.addStack();
+	body1.centerAlignContent();
+
+	const col_left = body1.addStack();
+	col_left.layoutVertically();
+
 	// ====== 最上方：城市 + 描述 + 大溫度（橫向，吃滿寬度） ======
-	const row1 = widget.addStack();
-	row1.layoutHorizontally();
-	row1.centerAlignContent();
 
-	// 左：城市 + 天氣描述
-	const row1Left1 = row1.addStack();
-	row1Left1.layoutVertically();
-	// row1Left1.centerAlignItems();
-	row1Left1.size = new Size(0, 0);
-	row1Left1.setPadding(0, 0, 0, 0);
-
-	const city = row1Left1.addStack();
-	city.layoutHorizontally();
+	// 左1行：城市位置
+	const city = col_left.addStack();
 	city.centerAlignContent();
-	city.size = new Size(0, 0);
-	city.setPadding(0, 0, 0, 0);
 
 	const locSymbol = SFSymbol.named("location.fill");
-	locSymbol.applyFont(Font.systemFont(15));
+	locSymbol.applyFont(Font.systemFont(12));
 	const citySymbol = city.addImage(locSymbol.image);
-	citySymbol.imageSize = new Size(15, 15);
+	citySymbol.imageSize = new Size(12, 12);
 	citySymbol.tintColor = Color.white();
 
-	const cityText = city.addText(`${current.name}`);
-	cityText.font = Font.boldSystemFont(14);
+	city.addSpacer(3);
+
+	const cityText = city.addText(displayName || current.name || "目前位置");
+	cityText.font = Font.boldSystemFont(12);
 	cityText.textColor = Color.white();
 
+	city.addSpacer();
+
+	// 左2行：當前天氣資料
+	const curr_wx = col_left.addStack();
+	curr_wx.centerAlignContent();
+
 	const weatherSymbol = SFSymbol.named(mapWeatherIcon(current.weather[0].icon));
-	weatherSymbol.applyFont(Font.systemFont(50));
-	const weatherSymbolImg = row1Left1.addImage(weatherSymbol.image);
-	weatherSymbolImg.imageSize = new Size(50, 50);
+	weatherSymbol.applyFont(Font.systemFont(55));
+	const weatherSymbolImg = curr_wx.addImage(weatherSymbol.image);
+	weatherSymbolImg.imageSize = new Size(55, 55);
 
-	// const desc = current.weather[0].description;
-	// const descText = row1Left1.addText(`${desc}`);
-	// descText.font = Font.systemFont(11);
-	// descText.textColor = Color.white();
-	// const feelsLike = Math.round(current.main.feels_like);
-	// const descLine = row1Left1.addText(`${desc} · 體感 ${feelsLike}°`);
-	// descLine.font = Font.systemFont(11);
-	// descLine.textColor = Color.white();
-	// descLine.minimumScaleFactor = 0.7;
+	curr_wx.addSpacer(8);
 
-	row1.addSpacer(5);
+	const curr_wx_data = curr_wx.addStack();
+	curr_wx_data.layoutVertically();
+	
+	curr_wx_data.addSpacer();
 
-	const row1Left2 = row1.addStack();
-	row1Left2.layoutVertically();
-	row1Left2.centerAlignContent();
-	row1Left2.size = new Size(0, 0);
-	row1Left2.setPadding(0, 0, 0, 0);
+	const wx_data_row = curr_wx_data.addStack();
+	wx_data_row.centerAlignContent();
 
+	const wx_data_r_c1 = wx_data_row.addStack();
+	wx_data_r_c1.layoutVertically();
 
 	// 濕度
-	const humidity = row1Left2.addStack();
-	humidity.layoutHorizontally();
+	const humidity = wx_data_r_c1.addStack();
 	humidity.centerAlignContent();
-	humidity.size = new Size(0, 0);
-	humidity.setPadding(0, 0, 0, 0);
 
 	const humiditySymbol = humidity.addImage(SFSymbol.named("humidity.fill").image);
 	humiditySymbol.imageSize = new Size(15, 15);
@@ -169,13 +207,9 @@ async function run() {
 	humidityVal.font = Font.systemFont(11);
 	humidityVal.textColor = Color.white();
 
-
 	// 風速
-	const windSpeed = row1Left2.addStack();
-	windSpeed.layoutHorizontally();
+	const windSpeed = wx_data_r_c1.addStack();
 	windSpeed.centerAlignContent();
-	windSpeed.size = new Size(0, 0);
-	windSpeed.setPadding(0, 0, 0, 0);
 
 	const windSpeedSymbol = windSpeed.addImage(SFSymbol.named("wind").image);
 	windSpeedSymbol.imageSize = new Size(15, 15);
@@ -185,17 +219,18 @@ async function run() {
 	windSpeedVal.font = Font.systemFont(11);
 	windSpeedVal.textColor = Color.white();
 
-	const sunrise = row1Left2.addStack();
-	sunrise.layoutHorizontally();
-	sunrise.centerAlignContent();
-	sunrise.size = new Size(0, 0);
-	sunrise.setPadding(0, 0, 0, 0);
+	wx_data_row.addSpacer(5);
 
-	const sunset = row1Left2.addStack();
-	sunset.layoutHorizontally();
+	// 日出&日落
+	const wx_data_r_c2 = wx_data_row.addStack();
+	wx_data_r_c2.layoutVertically();
+	wx_data_r_c2.bottomAlignContent();
+
+	const sunrise = wx_data_r_c2.addStack();
+	sunrise.centerAlignContent();
+
+	const sunset = wx_data_r_c2.addStack();
 	sunset.centerAlignContent();
-	sunset.size = new Size(0, 0);
-	sunset.setPadding(0, 0, 0, 0);
 
 	const sunriseUnix = current.sys?.sunrise;
 	const sunsetUnix = current.sys?.sunset;
@@ -221,34 +256,70 @@ async function run() {
 		sunsetTime.textColor = new Color("#ffd27f");
 	}
 
-	row1.addSpacer();
+	wx_data_row.addSpacer(5);
 
-	// 右：大字現在溫度
-	const row1Right = row1.addStack();
-	row1Right.layoutVertically();
-	row1Right.centerAlignContent();
-	row1Right.size = new Size(0, 0);
-	row1Right.setPadding(0, 0, 0, 0);
+	const wx_data_r_c3 = wx_data_row.addStack();
+	wx_data_r_c3.layoutVertically();
 
+	wx_data_r_c3.addSpacer(15);
+
+	const feelsLike = wx_data_r_c3.addStack();
+	feelsLike.centerAlignContent();
+
+	const feelsLikeSymbol = feelsLike.addImage(SFSymbol.named("thermometer.variable.and.figure").image);
+	feelsLikeSymbol.imageSize = new Size(15, 15);
+	feelsLikeSymbol.tintColor = new Color("#fff7ed");
+
+	const feelsLikeVal = feelsLike.addText(` ${Math.round(current.main.feels_like)}°`);
+	feelsLikeVal.font = Font.systemFont(11);
+	feelsLikeVal.textColor = Color.white();
+
+	wx_data_row.addSpacer();
+
+	curr_wx.addSpacer();
+
+	body1.addSpacer();
+
+	// 右側
+	const col_Right = body1.addStack();
+	col_Right.layoutVertically();
+
+	// 更新時間
+	const t_update = col_Right.addStack();
+	t_update.centerAlignContent();
+
+	t_update.addSpacer(20);
+
+	const updateTimeIcon = t_update.addImage(SFSymbol.named("arrow.up.circle.badge.clock").image);
+	updateTimeIcon.imageSize = new Size(10, 10);
+	updateTimeIcon.tintColor = new Color("#dddddd");
+
+	const now = new Date();
+	const updateTime = t_update.addText(`${formatTime(now)}`);
+	updateTime.font = Font.systemFont(10);
+	updateTime.textColor = new Color("#dddddd");
+	updateTime.minimumScaleFactor = 0.7;
+	
+	// 大字現在溫度
 	const tempNow = Math.round(current.main.temp);
 	const tMax = Math.round(current.main.temp_max);
 	const tMin = Math.round(current.main.temp_min);
 
-	const tempText = row1Right.addText(`${tempNow}°`);
+	const tempText = col_Right.addText(`${tempNow}°`);
 	tempText.font = Font.boldSystemFont(34);
 	tempText.textColor = Color.white();
 
 	const tempBarImg = provideTempBar(tempNow, tMax, tMin);
-	const tempBar = row1Right.addImage(tempBarImg);
+	const tempBar = col_Right.addImage(tempBarImg);
 	tempBar.imageSize = new Size(50, 5);
 
-	row1Right.addSpacer(3);
+	col_Right.addSpacer(3);
 
-	const hiloStack = row1Right.addStack();
+	const hiloStack = col_Right.addStack();
 	hiloStack.layoutHorizontally();
 	hiloStack.centerAlignContent();
-	hiloStack.size = new Size(0, 0);
-	hiloStack.setPadding(0, 0, 0, 0);
+	// hiloStack.size = new Size(0, 0);
+	// hiloStack.setPadding(0, 0, 0, 0);
 
 	const loTempText = hiloStack.addText(`${tMin}°`);
 	loTempText.font = Font.systemFont(11);
@@ -257,63 +328,9 @@ async function run() {
 
 	const hiTempText = hiloStack.addText(`${tMax}°`);
 	hiTempText.font = Font.systemFont(11);
-	// hiLoLine.textColor = new Color("#ffeb99");
 
-	widget.addSpacer();
+	widget.addSpacer(5);
 
-	// ====== 中段：左右兩欄內容 ======
-	// const body = widget.addStack();
-	// body.layoutHorizontally();
-	// body.centerAlignContent();
-
-	// ----- 左欄 -----
-	// const leftCol = body.addStack();
-	// leftCol.layoutVertically();
-	// leftCol.size = new Size(0, 0);   // 讓 Scriptable 自動分配寬度
-	// leftCol.setPadding(0, 0, 0, 0);
-
-	// 左欄 第1列
-	// const leftColRow1 = leftCol.addStack();
-	// leftColRow1.layoutHorizontally();
-	// leftColRow1.centerAlignContent();
-	// leftColRow1.size = new Size(0, 0);
-	// leftColRow1.setPadding(0, 0, 0, 0);
-
-	// const tMax = Math.round(current.main.temp_max);
-	// const tMin = Math.round(current.main.temp_min);
-
-	// const hiLoLine = leftColRow1.addText(`今天 高 ${tMax}° / 低 ${tMin}°`);
-	// hiLoLine.font = Font.systemFont(11);
-	// hiLoLine.textColor = new Color("#ffeb99");
-
-	// 左欄 第2列
-	// const leftColRow2 = leftCol.addStack();
-	// leftColRow2.layoutHorizontally();
-	// leftColRow2.centerAlignContent();
-	// leftColRow2.size = new Size(0, 0);
-	// leftColRow2.setPadding(0, 0, 0, 0);
-
-
-
-	// const extraLine = leftCol.addText(
-	// 	`💧 ${current.main.humidity}% · 🌬️ ${windSpeed} m/s`
-	// );
-	// extraLine.font = Font.systemFont(11);
-	// extraLine.textColor = Color.white();
-	// extraLine.minimumScaleFactor = 0.7;
-
-	// 左右欄中間空隙
-	// body.addSpacer();
-
-	// ----- 右欄 -----
-	// const rightCol = body.addStack();
-	// rightCol.layoutVertically();
-	// rightCol.size = new Size(0, 0);
-	// rightCol.setPadding(0, 0, 0, 0);
-
-
-
-	// widget.addSpacer(2);
 	// ------ 未來3小時 * 5個預測 -----
 	const body2 = widget.addStack();
 	body2.layoutHorizontally();
@@ -333,23 +350,6 @@ async function run() {
 		noForecast.font = Font.systemFont(11);
 		noForecast.textColor = Color.white();
 	}
-
-	// widget.addSpacer(4);
-
-	// ------
-	// const body3 = widget.addStack();
-	// body3.layoutHorizontally();
-	// body3.centerAlignContent();
-
-	// body3.addSpacer();
-
-	// const now = new Date();
-	// const timeLine = body3.addText(`更新：${formatTime(now)}`);
-	// timeLine.font = Font.systemFont(9);
-	// timeLine.textColor = new Color("#dddddd");
-	// timeLine.minimumScaleFactor = 0.7;
-
-	// ----
 
 	Script.setWidget(widget);
 	Script.complete();
@@ -399,10 +399,6 @@ async function addForecastIcon(stack) {
 	t.setPadding(0, 0, 0, 0);
 
 	let fRow1 = t.addStack();
-	fRow1.layoutHorizontally();
-	fRow1.centerAlignContent();
-	fRow1.size = new Size(0, 0);
-	fRow1.setPadding(0, 0, 0, 0);
 
 	fRow1.addSpacer();
 	const fTimeIcon = SFSymbol.named("clock");
@@ -413,10 +409,6 @@ async function addForecastIcon(stack) {
 	fRow1.addSpacer();
 
 	let fRow2 = t.addStack();
-	fRow2.layoutHorizontally();
-	fRow2.centerAlignContent();
-	fRow2.size = new Size(0, 0);
-	fRow2.setPadding(0, 0, 0, 0);
 
 	fRow2.addSpacer();
 	const fWeatherSymbol = SFSymbol.named("smoke");
@@ -427,10 +419,6 @@ async function addForecastIcon(stack) {
 	fRow2.addSpacer();
 
 	let fRow3 = t.addStack();
-	fRow3.layoutHorizontally();
-	fRow3.centerAlignContent();
-	fRow3.size = new Size(0, 0);
-	fRow3.setPadding(0, 0, 0, 0);
 
 	fRow3.addSpacer();
 	const fTempIcon = SFSymbol.named("thermometer");
@@ -441,13 +429,9 @@ async function addForecastIcon(stack) {
 	fRow3.addSpacer();
 
 	let fRow4 = t.addStack();
-	fRow4.layoutHorizontally();
-	fRow4.centerAlignContent();
-	fRow4.size = new Size(0, 0);
-	fRow4.setPadding(0, 0, 0, 0);
 
 	fRow4.addSpacer();
-	const fPopIcon = SFSymbol.named("umbrella");
+	const fPopIcon = SFSymbol.named("umbrella.percent");
 	fPopIcon.applyFont(Font.systemFont(SYMBOL_SIZE));
 	const fPopIconImg = fRow4.addImage(fPopIcon.image);
 	fPopIconImg.imageSize = new Size(IMG_WITH, IMG_HIGHT);
@@ -455,10 +439,6 @@ async function addForecastIcon(stack) {
 	fRow4.addSpacer();
 
 	let fRow5 = t.addStack();
-	fRow5.layoutHorizontally();
-	fRow5.centerAlignContent();
-	fRow5.size = new Size(0, 0);
-	fRow5.setPadding(0, 0, 0, 0);
 
 	fRow5.addSpacer();
 	const fRainIcon = SFSymbol.named("cloud.drizzle");
@@ -469,10 +449,6 @@ async function addForecastIcon(stack) {
 	fRow5.addSpacer();
 
 	let fRow6 = t.addStack();
-	fRow6.layoutHorizontally();
-	fRow6.centerAlignContent();
-	fRow6.size = new Size(0, 0);
-	fRow6.setPadding(0, 0, 0, 0);
 
 	fRow6.addSpacer();
 	const fWindIcon = SFSymbol.named("wind");
@@ -505,26 +481,16 @@ async function addForecast(stack, forecast_n) {
 		const rainStr = rainAmount.toFixed(1);
 
 		let fRow1 = t.addStack();
-		fRow1.layoutHorizontally();
-		fRow1.centerAlignContent();
-		fRow1.size = new Size(0, 0);
-		fRow1.setPadding(0, 0, 0, 0);
-		fRow1.spacing = 0
 		// fRow1.backgroundColor = new Color("#AAAAAA");
 
 		fRow1.addSpacer();
 		const titleLine = fRow1.addText(`${timeStr}`);
 		titleLine.font = Font.boldSystemFont(TIME_TEXT_SIZE);
-		titleLine.textColor = Color.white();
+		titleLine.textColor = new Color("#ffd27f");
 		titleLine.minimumScaleFactor = 0.7;
 		fRow1.addSpacer();
 
 		let fRow2 = t.addStack();
-		fRow2.layoutHorizontally();
-		fRow2.centerAlignContent();
-		fRow2.size = new Size(0, 0);
-		fRow2.setPadding(0, 0, 0, 0);
-		fRow2.spacing = 0
 
 		fRow2.addSpacer();
 		const fWeatherSymbol = SFSymbol.named(mapWeatherIcon(fIcon));
@@ -534,60 +500,41 @@ async function addForecast(stack, forecast_n) {
 		fRow2.addSpacer();
 
 		let fRow3 = t.addStack();
-		fRow3.layoutHorizontally();
-		fRow3.centerAlignContent();
-		fRow3.size = new Size(0, 0);
-		fRow3.setPadding(0, 0, 0, 0);
-		fRow3.spacing = 0
 
-		fRow3.addSpacer(null);
+		fRow3.addSpacer();
 		const forecastTemp = fRow3.addText(`${fTemp}°`);
 		forecastTemp.font = Font.systemFont(DATA_TEXT_SIZE);
 		forecastTemp.textColor = Color.white();
 		forecastTemp.minimumScaleFactor = 0.7;
-		fRow3.addSpacer(null);
+		fRow3.addSpacer();
 
 		let fRow4 = t.addStack();
-		fRow4.layoutHorizontally();
-		fRow4.centerAlignContent();
-		fRow4.size = new Size(0, 0);
-		fRow4.setPadding(0, 0, 0, 0);
-		fRow4.spacing = 0
 
-		fRow4.addSpacer(null);
+		fRow4.addSpacer();
 		const forecastPop = fRow4.addText(`${pop}`);
 		forecastPop.font = Font.systemFont(DATA_TEXT_SIZE);
 		forecastPop.textColor = new Color("#add8e6");
 		forecastPop.minimumScaleFactor = 0.7;
-		fRow4.addSpacer(null);
+		// forecastPop.centerAlignText();
+		fRow4.addSpacer();
 
 		let fRow5 = t.addStack();
-		fRow5.layoutHorizontally();
-		fRow5.centerAlignContent();
-		fRow5.size = new Size(0, 0);
-		fRow5.setPadding(0, 0, 0, 0);
-		fRow5.spacing = 0
 
-		fRow5.addSpacer(null);
-		const forecastRain = fRow5.addText(rainStr == 0 ? " " : rainStr.toString());
+		fRow5.addSpacer();
+		const forecastRain = fRow5.addText(rainStr == 0 ? "0" : rainStr.toString());
 		forecastRain.font = Font.systemFont(DATA_TEXT_SIZE);
 		forecastRain.textColor = new Color("#add8e6");
 		forecastRain.minimumScaleFactor = 0.7;
-		fRow5.addSpacer(null);
+		fRow5.addSpacer();
 
 		let fRow6 = t.addStack();
-		fRow6.layoutHorizontally();
-		fRow6.centerAlignContent();
-		fRow6.size = new Size(0, 0);
-		fRow6.setPadding(0, 0, 0, 0);
-		fRow6.spacing = 0
 
-		fRow6.addSpacer(null);
+		fRow6.addSpacer();
 		const forecastWind = fRow6.addText(`${fWind}`);
 		forecastWind.font = Font.systemFont(DATA_TEXT_SIZE);
 		forecastWind.textColor = new Color("#add8e6");
 		forecastWind.minimumScaleFactor = 0.7;
-		fRow6.addSpacer(null);
+		fRow6.addSpacer();
 	} else {
 		const noData = t.addText("無法取得未來 3 小時預報");
 		noData.font = Font.systemFont(11);
@@ -606,11 +553,12 @@ async function divider(stack, width) {
 }
 
 // ========= API 呼叫：目前天氣 =========
-async function fetchCurrentWeather() {
+async function fetchCurrentWeather(latitude, longitude) {
 	try {
 		const url =
 			`https://api.openweathermap.org/data/2.5/weather` +
-			`?q=${encodeURIComponent(CITY_NAME)}` +
+			`?lat=${latitude}` +
+			`&lon=${longitude}` +
 			`&appid=${API_KEY}` +
 			`&units=${UNITS}` +
 			`&lang=${LANG}`;
@@ -630,11 +578,12 @@ async function fetchCurrentWeather() {
 }
 
 // ========= API 呼叫：5 天 / 3 小時預報 =========
-async function fetchForecast() {
+async function fetchForecast(latitude, longitude) {
 	try {
 		const url =
 			`https://api.openweathermap.org/data/2.5/forecast` +
-			`?q=${encodeURIComponent(CITY_NAME)}` +
+			`?lat=${latitude}` +
+			`&lon=${longitude}` +
 			`&appid=${API_KEY}` +
 			`&units=${UNITS}` +
 			`&lang=${LANG}`;
