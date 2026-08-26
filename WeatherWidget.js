@@ -12,24 +12,26 @@ const USE_BACKGROUND_GRADIENT = true; // 是否使用漸層背景
 
 const fm = FileManager.local();
 const CACHE_FILE = fm.joinPath(fm.documentsDirectory(), "weather-cache.json");
+const CACHE_SCHEMA_VERSION = 4;
 
 const TIME_TEXT_SIZE = 12;
 const DATA_TEXT_SIZE = 10;
 
-// 只保存完整且成功取得的天氣資料，供鎖屏網路不穩時備援。
-function saveWeatherCache(current, forecast, displayName) {
+// 只保存同一次更新中完整取得的 Current、Hourly 與 Daily，避免部分成功覆蓋舊快取。
+function saveWeatherCache(current, forecast, daily, displayName) {
 	try {
 		fm.writeString(CACHE_FILE, JSON.stringify({
+			schemaVersion: CACHE_SCHEMA_VERSION,
 			updatedAt: Date.now(),
 			current,
 			forecast,
+			daily,
 			displayName
 		}));
 	} catch (error) {
 		console.error(`寫入快取失敗：${error}`);
 	}
 }
-
 async function getCurrentLocation() {
 	try {
 		// 天氣查詢不需要 GPS 等級精度，100 公尺精度可加快定位並減少耗電。
@@ -61,13 +63,27 @@ async function getDisplayName(latitude, longitude) {
 function loadWeatherCache() {
 	try {
 		if (!fm.fileExists(CACHE_FILE)) return null;
-		return JSON.parse(fm.readString(CACHE_FILE));
+		const cache = JSON.parse(fm.readString(CACHE_FILE));
+
+		// 忽略 v2/v3 舊格式及不完整內容，避免不同 JSON 結構造成小工具顯示錯誤。
+		const isComplete =
+			cache?.schemaVersion === CACHE_SCHEMA_VERSION &&
+			Number.isFinite(cache.updatedAt) &&
+			Number.isFinite(cache.current?.dt) &&
+			Array.isArray(cache.forecast) && cache.forecast.length > 0 &&
+			Number.isFinite(cache.daily?.min) &&
+			Number.isFinite(cache.daily?.max);
+
+		if (!isComplete) {
+			console.log("忽略版本不符或內容不完整的天氣快取。");
+			return null;
+		}
+		return cache;
 	} catch (error) {
 		console.error(`讀取快取失敗：${error}`);
 		return null;
 	}
 }
-
 function mapWeatherIcon(icon) {
 	const base = icon.slice(0, 2)  // 取前兩碼 01 / 02 / 03...
 	const isDay = icon.endsWith("d")
@@ -130,22 +146,37 @@ async function run() {
 
 	const liveCurrent = current;
 	const liveForecast = forecastResult;
+	const liveDailyTemperature = dailyTemperature;
 	const liveDisplayName = displayName;
 	const cache = loadWeatherCache();
+	let dataUpdatedAt = Number.isFinite(liveCurrent?.dt)
+		? liveCurrent.dt * 1000
+		: null;
 
-	// 網路失敗時個別回退到上次成功資料，且預報永遠正規化為陣列。
+	// 網路失敗時個別回退到同一份完整快取，且預報永遠正規化為陣列。
 	if (!current) {
 		current = cache?.current ?? null;
+		dailyTemperature = cache?.daily ?? null;
 		displayName = cache?.displayName ?? null;
+		dataUpdatedAt = cache?.updatedAt ?? null;
 	}
 	if (!Array.isArray(forecastResult)) {
 		forecastResult = cache?.forecast ?? [];
 	}
 	const forecastList = Array.isArray(forecastResult) ? forecastResult : [];
 
-	// 目前天氣（已含每日高低溫）與逐時預報都成功才更新快取，避免以不完整資料覆蓋舊快取。
-	if (liveCurrent && Array.isArray(liveForecast) && liveForecast.length > 0) {
-		saveWeatherCache(liveCurrent, liveForecast, liveDisplayName || null);
+	// 三組 OpenWeather 即時資料都成功才更新快取，避免以部分回應覆蓋完整舊資料。
+	if (
+		liveCurrent &&
+		Array.isArray(liveForecast) && liveForecast.length > 0 &&
+		liveDailyTemperature
+	) {
+		saveWeatherCache(
+			liveCurrent,
+			liveForecast,
+			liveDailyTemperature,
+			liveDisplayName || null
+		);
 	}
 
 	if (!current) {
@@ -303,17 +334,24 @@ async function run() {
 	updateTimeIcon.imageSize = new Size(10, 10);
 	updateTimeIcon.tintColor = new Color("#dddddd");
 
-	const now = new Date();
-	const updateTime = t_update.addText(`${formatTime(now)}`);
+	// 即時資料顯示 API 的資料時間；使用快取時顯示該快取最後成功寫入的時間。
+	const updateDate = Number.isFinite(dataUpdatedAt)
+		? new Date(dataUpdatedAt)
+		: new Date();
+	const updateTime = t_update.addText(`${formatTime(updateDate)}`);
 	updateTime.font = Font.systemFont(10);
 	updateTime.textColor = new Color("#dddddd");
 	updateTime.minimumScaleFactor = 0.7;
 	
-	// 大字現在溫度
+	// 把目前溫度納入顯示範圍，避免四捨五入後越界。
+	const effectiveMinTemp = Math.min(current.main.temp_min, current.main.temp)
+	const effectiveMaxTemp = Math.max(current.main.temp_max, current.main.temp)
+	
 	const tempNow = Math.round(current.main.temp);
-	const tMax = Math.round(current.main.temp_max);
-	const tMin = Math.round(current.main.temp_min);
+	const tMax = Math.round(effectiveMaxTemp);
+	const tMin = Math.round(effectiveMinTemp);
 
+	// 大字現在溫度
 	const tempText = col_Right.addText(`${tempNow}°`);
 	tempText.font = Font.boldSystemFont(34);
 	tempText.textColor = Color.white();
@@ -561,120 +599,133 @@ async function divider(stack, width) {
 	divider.cornerRadius = 1;
 }
 
-// ========= API 呼叫：目前天氣 =========
-async function fetchCurrentWeather(latitude, longitude) {
-	try {
-		const url =
-			`https://api.openweathermap.org/data/4.0/onecall/current` +
-			`?lat=${latitude}` +
-			`&lon=${longitude}` +
-			`&appid=${API_KEY}` +
-			`&units=${UNITS}` +
-			`&lang=${LANG}`;
+// ========= OpenWeather 共用請求與錯誤處理 =========
+function logOpenWeatherError(label, statusCode, json, error = null) {
+	const detail = json?.message ?? error?.message ?? "未知錯誤";
 
-		const req = new Request(url);
-		req.timeoutInterval = 10;
+	if (statusCode === 401) {
+		console.error(`${label} 401：API Key 無效或尚未啟用 One Call API 4.0。${detail}`);
+	} else if (statusCode === 429) {
+		console.error(`${label} 429：OpenWeather API 呼叫額度已用完。${detail}`);
+	} else if (statusCode >= 500) {
+		console.error(`${label} ${statusCode}：OpenWeather 服務暫時異常。${detail}`);
+	} else if (Number.isFinite(statusCode)) {
+		console.error(`${label} ${statusCode}：${detail}`);
+	} else {
+		console.error(`${label} 網路或解析錯誤：${detail}`);
+	}
+}
+
+async function loadOpenWeatherJSON(url, label) {
+	const req = new Request(url);
+	req.timeoutInterval = 10;
+
+	try {
 		const json = await req.loadJSON();
-		if (json.cod && json.cod !== 200) {
-			console.error("Current Weather Error:", json);
+		const statusCode = req.response?.statusCode;
+
+		// API 4.0 不再依賴 json.cod；以實際 HTTP 狀態碼判斷請求是否成功。
+		if (!Number.isFinite(statusCode) || statusCode < 200 || statusCode >= 300) {
+			logOpenWeatherError(label, statusCode, json);
 			return null;
 		}
-
-		const data = json.data?.[0];
-		if (!data) return null;
-
-		// 將 API 4.0 扁平欄位轉成既有 UI 使用的 2.5 結構，避免改動畫面程式。
-		return {
-			dt: data.dt,
-			weather: data.weather ?? [],
-			main: {
-				temp: data.temp,
-				feels_like: data.feels_like,
-				humidity: data.humidity
-			},
-			wind: { speed: data.wind_speed ?? 0 },
-			sys: {
-				sunrise: data.sunrise,
-				sunset: data.sunset
-			}
-		};
-	} catch (e) {
-		console.error("fetchCurrentWeather Exception:", e);
+		return json;
+	} catch (error) {
+		logOpenWeatherError(label, req.response?.statusCode, null, error);
 		return null;
 	}
+}
+
+// ========= API 呼叫：目前天氣 =========
+async function fetchCurrentWeather(latitude, longitude) {
+	const url =
+		`https://api.openweathermap.org/data/4.0/onecall/current` +
+		`?lat=${latitude}` +
+		`&lon=${longitude}` +
+		`&appid=${API_KEY}` +
+		`&units=${UNITS}` +
+		`&lang=${LANG}`;
+
+	const json = await loadOpenWeatherJSON(url, "Current Weather");
+	if (!Array.isArray(json?.data) || json.data.length === 0) {
+		if (json) console.error("Current Weather Data Error：response.data 不存在或為空。");
+		return null;
+	}
+
+	const data = json.data[0];
+	// 將 API 4.0 扁平欄位轉成既有 UI 使用的 2.5 結構，避免改動畫面程式。
+	return {
+		dt: data.dt,
+		weather: data.weather ?? [],
+		main: {
+			temp: data.temp,
+			feels_like: data.feels_like,
+			humidity: data.humidity
+		},
+		wind: { speed: data.wind_speed ?? 0 },
+		sys: {
+			sunrise: data.sunrise,
+			sunset: data.sunset
+		}
+	};
 }
 
 // ========= API 呼叫：當日最高 / 最低溫 =========
 async function fetchDailyTemperature(latitude, longitude) {
-	try {
-		const url =
-			`https://api.openweathermap.org/data/4.0/onecall/timeline/1day` +
-			`?lat=${latitude}` +
-			`&lon=${longitude}` +
-			`&appid=${API_KEY}` +
-			`&units=${UNITS}` +
-			`&lang=${LANG}`;
+	const url =
+		`https://api.openweathermap.org/data/4.0/onecall/timeline/1day` +
+		`?lat=${latitude}` +
+		`&lon=${longitude}` +
+		`&appid=${API_KEY}` +
+		`&units=${UNITS}` +
+		`&lang=${LANG}`;
 
-		const req = new Request(url);
-		req.timeoutInterval = 10;
-		const json = await req.loadJSON();
-		if (json.cod && json.cod !== 200) {
-			console.error("Daily Temperature Error:", json);
-			return null;
-		}
-
-		const temp = json.data?.[0]?.temp;
-		if (!Number.isFinite(temp?.min) || !Number.isFinite(temp?.max)) return null;
-		return { min: temp.min, max: temp.max };
-	} catch (e) {
-		console.error("fetchDailyTemperature Exception:", e);
+	const json = await loadOpenWeatherJSON(url, "Daily Temperature");
+	if (!Array.isArray(json?.data) || json.data.length === 0) {
+		if (json) console.error("Daily Temperature Data Error：response.data 不存在或為空。");
 		return null;
 	}
+
+	const temp = json.data[0]?.temp;
+	if (!Number.isFinite(temp?.min) || !Number.isFinite(temp?.max)) {
+		console.error("Daily Temperature Data Error：temp.min 或 temp.max 無效。");
+		return null;
+	}
+	return { min: temp.min, max: temp.max };
 }
 
 // ========= API 呼叫：逐小時預報 =========
 async function fetchForecast(latitude, longitude) {
-	try {
-		const url =
-			`https://api.openweathermap.org/data/4.0/onecall/timeline/1h` +
-			`?lat=${latitude}` +
-			`&lon=${longitude}` +
-			`&appid=${API_KEY}` +
-			`&units=${UNITS}` +
-			`&lang=${LANG}`;
+	const url =
+		`https://api.openweathermap.org/data/4.0/onecall/timeline/1h` +
+		`?lat=${latitude}` +
+		`&lon=${longitude}` +
+		`&appid=${API_KEY}` +
+		`&units=${UNITS}` +
+		`&lang=${LANG}`;
 
-		const req = new Request(url);
-		req.timeoutInterval = 10;
-		const json = await req.loadJSON();
-
-		if (json.cod && json.cod !== "200") {
-			console.error("Forecast Error:", json);
-			return null;
-		}
-
-		if (json.data && json.data.length > 0) {
-			const interval = [1, 2].includes(FORECAST_INTERVAL_HOURS)
-				? FORECAST_INTERVAL_HOURS
-				: 1;
-
-			// 依設定抽取每 1 或 2 小時資料，再轉成既有預報 UI 使用的結構。
-			return json.data
-				.filter((_, index) => index % interval === 0)
-				.slice(0, 8)
-				.map(item => ({
-					dt: item.dt,
-					main: { temp: item.temp },
-					weather: item.weather ?? [],
-					pop: item.pop ?? 0,
-					rain: item.rain,
-					wind: { speed: item.wind_speed ?? 0 }
-				}));
-		}
-		return null;
-	} catch (e) {
-		console.error("fetchForecast Exception:", e);
+	const json = await loadOpenWeatherJSON(url, "Forecast");
+	if (!Array.isArray(json?.data) || json.data.length === 0) {
+		if (json) console.error("Forecast Data Error：response.data 不存在或為空。");
 		return null;
 	}
+
+	const interval = [1, 2].includes(FORECAST_INTERVAL_HOURS)
+		? FORECAST_INTERVAL_HOURS
+		: 1;
+
+	// 依設定抽取每 1 或 2 小時資料，再轉成既有預報 UI 使用的結構。
+	return json.data
+		.filter((_, index) => index % interval === 0)
+		.slice(0, 8)
+		.map(item => ({
+			dt: item.dt,
+			main: { temp: item.temp },
+			weather: item.weather ?? [],
+			pop: item.pop ?? 0,
+			rain: item.rain,
+			wind: { speed: item.wind_speed ?? 0 }
+		}));
 }
 // ========= 工具函式 =========
 function formatTime(date) {
