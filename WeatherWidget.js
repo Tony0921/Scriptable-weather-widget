@@ -102,8 +102,64 @@ function mapWeatherIcon(icon) {
 	}
 }
 
+// 非中型尺寸只顯示使用提示，不建立正式天氣版面，避免內容在其他尺寸跑版。
+function createUnsupportedSizeWidget() {
+	const widget = new ListWidget();
+	widget.setPadding(12, 12, 12, 12);
+	widget.backgroundColor = new Color("#1c1c1e");
+
+	widget.addSpacer();
+
+	const warningIcon = widget.addText("⚠️");
+	warningIcon.centerAlignText();
+	warningIcon.font = Font.systemFont(24);
+
+	widget.addSpacer(8);
+
+	const title = widget.addText("不支援此尺寸");
+	title.centerAlignText();
+	title.font = Font.boldSystemFont(15);
+	title.textColor = Color.white();
+	title.minimumScaleFactor = 0.7;
+
+	widget.addSpacer(2);
+
+	const englishTitle = widget.addText("Unsupported Widget Size");
+	englishTitle.centerAlignText();
+	englishTitle.font = Font.boldSystemFont(12);
+	englishTitle.textColor = Color.white();
+	englishTitle.minimumScaleFactor = 0.6;
+
+	widget.addSpacer(4);
+
+	const message = widget.addText("請改用中型小工具");
+	message.centerAlignText();
+	message.font = Font.systemFont(12);
+	message.textColor = new Color("#aaaaaa");
+	message.minimumScaleFactor = 0.7;
+
+	widget.addSpacer(2);
+
+	// 同時提供英文提示，讓不同語言的使用者都能辨識尺寸限制。
+	const englishMessage = widget.addText("Please use the medium widget.");
+	englishMessage.centerAlignText();
+	englishMessage.font = Font.systemFont(10);
+	englishMessage.textColor = new Color("#aaaaaa");
+	englishMessage.minimumScaleFactor = 0.6;
+
+	widget.addSpacer();
+	return widget;
+}
+
 // ========= 主程式 =========
 async function run() {
+	// 尺寸檢查必須先於定位與 API 請求，避免非中型 Widget 執行無用的資料更新。
+	if (config.runsInWidget && config.widgetFamily !== "medium") {
+		Script.setWidget(createUnsupportedSizeWidget());
+		Script.complete();
+		return;
+	}
+
 	const widget = new ListWidget();
 	widget.setPadding(10, 12, 10, 12);
 
