@@ -12,7 +12,7 @@ const USE_BACKGROUND_GRADIENT = true; // 是否使用漸層背景
 
 const fm = FileManager.local();
 const CACHE_FILE = fm.joinPath(fm.documentsDirectory(), "weather-cache.json");
-const CACHE_SCHEMA_VERSION = 4;
+const CACHE_SCHEMA_VERSION = 5;
 
 const TIME_TEXT_SIZE = 12;
 const DATA_TEXT_SIZE = 10;
@@ -65,7 +65,7 @@ function loadWeatherCache() {
 		if (!fm.fileExists(CACHE_FILE)) return null;
 		const cache = JSON.parse(fm.readString(CACHE_FILE));
 
-		// 忽略 v2/v3 舊格式及不完整內容，避免不同 JSON 結構造成小工具顯示錯誤。
+		// 忽略舊版格式及不完整內容，避免不同 JSON 結構造成小工具顯示錯誤。
 		const isComplete =
 			cache?.schemaVersion === CACHE_SCHEMA_VERSION &&
 			Number.isFinite(cache.updatedAt) &&
@@ -135,19 +135,14 @@ async function run() {
 		]);
 	}
 
-	// API 4.0 Current 不含當日高低溫；只有 Current 與 Daily 都成功才組成完整目前天氣。
-	if (current && dailyTemperature) {
-		current.main.temp_min = dailyTemperature.min;
-		current.main.temp_max = dailyTemperature.max;
-	} else if (current) {
+	// API 4.0 Current 不含當日高低溫；缺少 Daily 時不使用不完整的即時資料。
+	if (current && !dailyTemperature) {
 		console.error("Daily Temperature Error: 無法取得當日最高及最低溫");
 		current = null;
 	}
 
 	const liveCurrent = current;
 	const liveForecast = forecastResult;
-	const liveDailyTemperature = dailyTemperature;
-	const liveDisplayName = displayName;
 	const cache = loadWeatherCache();
 	let dataUpdatedAt = Number.isFinite(liveCurrent?.dt)
 		? liveCurrent.dt * 1000
@@ -160,22 +155,20 @@ async function run() {
 		displayName = cache?.displayName ?? null;
 		dataUpdatedAt = cache?.updatedAt ?? null;
 	}
-	if (!Array.isArray(forecastResult)) {
-		forecastResult = cache?.forecast ?? [];
-	}
-	const forecastList = Array.isArray(forecastResult) ? forecastResult : [];
+	const forecastList = Array.isArray(forecastResult)
+		? forecastResult
+		: cache?.forecast ?? [];
 
 	// 三組 OpenWeather 即時資料都成功才更新快取，避免以部分回應覆蓋完整舊資料。
 	if (
 		liveCurrent &&
-		Array.isArray(liveForecast) && liveForecast.length > 0 &&
-		liveDailyTemperature
+		Array.isArray(liveForecast) && liveForecast.length > 0
 	) {
 		saveWeatherCache(
 			liveCurrent,
 			liveForecast,
-			liveDailyTemperature,
-			liveDisplayName || null
+			dailyTemperature,
+			displayName || null
 		);
 	}
 
@@ -344,8 +337,8 @@ async function run() {
 	updateTime.minimumScaleFactor = 0.7;
 	
 	// 把目前溫度納入顯示範圍，避免四捨五入後越界。
-	const effectiveMinTemp = Math.min(current.main.temp_min, current.main.temp)
-	const effectiveMaxTemp = Math.max(current.main.temp_max, current.main.temp)
+	const effectiveMinTemp = Math.min(dailyTemperature.min, current.main.temp)
+	const effectiveMaxTemp = Math.max(dailyTemperature.max, current.main.temp)
 	
 	const tempNow = Math.round(current.main.temp);
 	const tMax = Math.round(effectiveMaxTemp);
@@ -365,8 +358,6 @@ async function run() {
 	const hiloStack = col_Right.addStack();
 	hiloStack.layoutHorizontally();
 	hiloStack.centerAlignContent();
-	// hiloStack.size = new Size(0, 0);
-	// hiloStack.setPadding(0, 0, 0, 0);
 
 	const loTempText = hiloStack.addText(`${tMin}°`);
 	loTempText.font = Font.systemFont(11);
@@ -382,15 +373,11 @@ async function run() {
 	const body2 = widget.addStack();
 	body2.layoutHorizontally();
 	body2.centerAlignContent();
-	body2.size = new Size(0, 0);
-	body2.setPadding(0, 0, 0, 0);
-	body2.spacing = 0
 
 	if (forecastList.length > 0) {
 		addForecastIcon(body2);
-		for (let i = 0; i < Math.min(8, forecastList.length); i++) {
-			// if (i > 0) body2.addSpacer();
-			addForecast(body2, forecastList[i]);
+		for (const forecast of forecastList) {
+			addForecast(body2, forecast);
 		}
 	} else {
 		const noForecast = body2.addText("暫時無法取得預報");
@@ -406,7 +393,6 @@ function provideTempBar(temp, maxTemp, minTemp) {
 
 	const tempBarWidth = 200;
 	const tempBarHeight = 20;
-	// const weatherData = this.data.weather
 
 	let percent = (temp - minTemp) / (maxTemp - minTemp);
 	if (percent < 0) { percent = 0; }
@@ -435,88 +421,60 @@ function provideTempBar(temp, maxTemp, minTemp) {
 	return draw.getImage();
 }
 
-async function addForecastIcon(stack) {
-	let SYMBOL_SIZE = 10;
-	let IMG_WITH = 10;
-	let IMG_HIGHT = 10;
+// 建立置中的圖示列，統一預報標題與逐時天氣圖示的版面設定。
+function addCenteredIconRow(stack, symbolName, size, tintColor = null) {
+	const row = stack.addStack();
+	row.addSpacer();
 
-	let t = stack.addStack();
-	t.layoutVertically();
-	t.size = new Size(0, 0);
-	t.setPadding(0, 0, 0, 0);
+	const symbol = SFSymbol.named(symbolName);
+	symbol.applyFont(Font.systemFont(size));
+	const image = row.addImage(symbol.image);
+	image.imageSize = new Size(size, size);
+	if (tintColor) image.tintColor = tintColor;
 
-	let fRow1 = t.addStack();
-
-	fRow1.addSpacer();
-	const fTimeIcon = SFSymbol.named("clock");
-	fTimeIcon.applyFont(Font.systemFont(SYMBOL_SIZE));
-	const fTimeIconImg = fRow1.addImage(fTimeIcon.image);
-	fTimeIconImg.imageSize = new Size(IMG_WITH, IMG_HIGHT);
-	fTimeIconImg.tintColor = Color.yellow();
-	fRow1.addSpacer();
-
-	let fRow2 = t.addStack();
-
-	fRow2.addSpacer();
-	const fWeatherSymbol = SFSymbol.named("smoke");
-	fWeatherSymbol.applyFont(Font.systemFont(20));
-	const fWeatherSymbolImg = fRow2.addImage(fWeatherSymbol.image);
-	fWeatherSymbolImg.imageSize = new Size(20, 20);
-	fWeatherSymbolImg.tintColor = Color.blue();
-	fRow2.addSpacer();
-
-	let fRow3 = t.addStack();
-
-	fRow3.addSpacer();
-	const fTempIcon = SFSymbol.named("thermometer");
-	fTempIcon.applyFont(Font.systemFont(SYMBOL_SIZE));
-	const fTempIconImg = fRow3.addImage(fTempIcon.image);
-	fTempIconImg.imageSize = new Size(IMG_WITH, IMG_HIGHT);
-	fTempIconImg.tintColor = Color.white();
-	fRow3.addSpacer();
-
-	let fRow4 = t.addStack();
-
-	fRow4.addSpacer();
-	const fPopIcon = SFSymbol.named("umbrella.percent");
-	fPopIcon.applyFont(Font.systemFont(SYMBOL_SIZE));
-	const fPopIconImg = fRow4.addImage(fPopIcon.image);
-	fPopIconImg.imageSize = new Size(IMG_WITH, IMG_HIGHT);
-	fPopIconImg.tintColor = Color.white();
-	fRow4.addSpacer();
-
-	let fRow5 = t.addStack();
-
-	fRow5.addSpacer();
-	const fRainIcon = SFSymbol.named("cloud.drizzle");
-	fRainIcon.applyFont(Font.systemFont(SYMBOL_SIZE));
-	const fRainIconImg = fRow5.addImage(fRainIcon.image);
-	fRainIconImg.imageSize = new Size(IMG_WITH, IMG_HIGHT);
-	fRainIconImg.tintColor = Color.white();
-	fRow5.addSpacer();
-
-	let fRow6 = t.addStack();
-
-	fRow6.addSpacer();
-	const fWindIcon = SFSymbol.named("wind");
-	fWindIcon.applyFont(Font.systemFont(SYMBOL_SIZE));
-	const fWindIconImg = fRow6.addImage(fWindIcon.image);
-	fWindIconImg.imageSize = new Size(IMG_WITH, IMG_HIGHT);
-	fWindIconImg.tintColor = Color.white();
-	fRow6.addSpacer();
+	row.addSpacer();
+	return row;
 }
 
-async function addForecast(stack, forecast_n) {
-	let t = stack.addStack();
+// 建立置中的文字列，避免各預報欄位重複設定字型、顏色與縮放比例。
+function addCenteredTextRow(stack, text, font, textColor) {
+	const row = stack.addStack();
+	row.addSpacer();
+
+	const label = row.addText(text);
+	label.font = font;
+	label.textColor = textColor;
+	label.minimumScaleFactor = 0.7;
+
+	row.addSpacer();
+	return row;
+}
+
+function addForecastIcon(stack) {
+	const t = stack.addStack();
 	t.layoutVertically();
-	t.size = new Size(0, 0);
-	t.setPadding(0, 0, 0, 0);
-	// t.backgroundColor = new Color("#AAAAAA");
+
+	const iconRows = [
+		{ symbolName: "clock", size: 10, tintColor: Color.yellow() },
+		{ symbolName: "smoke", size: 20, tintColor: Color.blue() },
+		{ symbolName: "thermometer", size: 10, tintColor: Color.white() },
+		{ symbolName: "umbrella.percent", size: 10, tintColor: Color.white() },
+		{ symbolName: "cloud.drizzle", size: 10, tintColor: Color.white() },
+		{ symbolName: "wind", size: 10, tintColor: Color.white() }
+	];
+
+	for (const iconRow of iconRows) {
+		addCenteredIconRow(t, iconRow.symbolName, iconRow.size, iconRow.tintColor);
+	}
+}
+
+function addForecast(stack, forecast_n) {
+	const t = stack.addStack();
+	t.layoutVertically();
 
 	if (forecast_n) {
 		const timeStr = getHoursFromUnix(forecast_n.dt);
 		const fTemp = Math.round(forecast_n.main.temp);
-		const fDesc = forecast_n.weather[0].description;
 		const fIcon = forecast_n.weather[0].icon;
 		const pop = forecast_n.pop != null ? Math.round(forecast_n.pop * 100) : 0;
 		const fWind = (forecast_n.wind?.speed ?? 0).toFixed(1)
@@ -527,61 +485,12 @@ async function addForecast(stack, forecast_n) {
 		}
 		const rainStr = rainAmount.toFixed(1);
 
-		let fRow1 = t.addStack();
-		// fRow1.backgroundColor = new Color("#AAAAAA");
-
-		fRow1.addSpacer();
-		const titleLine = fRow1.addText(`${timeStr}`);
-		titleLine.font = Font.boldSystemFont(TIME_TEXT_SIZE);
-		titleLine.textColor = new Color("#ffd27f");
-		titleLine.minimumScaleFactor = 0.7;
-		fRow1.addSpacer();
-
-		let fRow2 = t.addStack();
-
-		fRow2.addSpacer();
-		const fWeatherSymbol = SFSymbol.named(mapWeatherIcon(fIcon));
-		fWeatherSymbol.applyFont(Font.systemFont(20));
-		const fWeatherSymbolImg = fRow2.addImage(fWeatherSymbol.image);
-		fWeatherSymbolImg.imageSize = new Size(20, 20);
-		fRow2.addSpacer();
-
-		let fRow3 = t.addStack();
-
-		fRow3.addSpacer();
-		const forecastTemp = fRow3.addText(`${fTemp}°`);
-		forecastTemp.font = Font.systemFont(DATA_TEXT_SIZE);
-		forecastTemp.textColor = Color.white();
-		forecastTemp.minimumScaleFactor = 0.7;
-		fRow3.addSpacer();
-
-		let fRow4 = t.addStack();
-
-		fRow4.addSpacer();
-		const forecastPop = fRow4.addText(`${pop}`);
-		forecastPop.font = Font.systemFont(DATA_TEXT_SIZE);
-		forecastPop.textColor = new Color("#add8e6");
-		forecastPop.minimumScaleFactor = 0.7;
-		// forecastPop.centerAlignText();
-		fRow4.addSpacer();
-
-		let fRow5 = t.addStack();
-
-		fRow5.addSpacer();
-		const forecastRain = fRow5.addText(rainStr == 0 ? "0" : rainStr.toString());
-		forecastRain.font = Font.systemFont(DATA_TEXT_SIZE);
-		forecastRain.textColor = new Color("#add8e6");
-		forecastRain.minimumScaleFactor = 0.7;
-		fRow5.addSpacer();
-
-		let fRow6 = t.addStack();
-
-		fRow6.addSpacer();
-		const forecastWind = fRow6.addText(`${fWind}`);
-		forecastWind.font = Font.systemFont(DATA_TEXT_SIZE);
-		forecastWind.textColor = new Color("#add8e6");
-		forecastWind.minimumScaleFactor = 0.7;
-		fRow6.addSpacer();
+		addCenteredTextRow(t, timeStr, Font.boldSystemFont(TIME_TEXT_SIZE), new Color("#ffd27f"));
+		addCenteredIconRow(t, mapWeatherIcon(fIcon), 20);
+		addCenteredTextRow(t, `${fTemp}°`, Font.systemFont(DATA_TEXT_SIZE), Color.white());
+		addCenteredTextRow(t, `${pop}`, Font.systemFont(DATA_TEXT_SIZE), new Color("#add8e6"));
+		addCenteredTextRow(t, rainStr == 0 ? "0" : rainStr, Font.systemFont(DATA_TEXT_SIZE), new Color("#add8e6"));
+		addCenteredTextRow(t, fWind, Font.systemFont(DATA_TEXT_SIZE), new Color("#add8e6"));
 	} else {
 		const noData = t.addText("無法取得未來 3 小時預報");
 		noData.font = Font.systemFont(11);
@@ -590,13 +499,6 @@ async function addForecast(stack, forecast_n) {
 	}
 
 	return t
-}
-
-async function divider(stack, width) {
-	let divider = stack.addStack();
-	divider.size = new Size(width, 0);   // 寬 1pt，高度自動撐滿
-	divider.backgroundColor = new Color("#cccccc");
-	divider.cornerRadius = 1;
 }
 
 // ========= OpenWeather 共用請求與錯誤處理 =========
@@ -636,15 +538,19 @@ async function loadOpenWeatherJSON(url, label) {
 	}
 }
 
-// ========= API 呼叫：目前天氣 =========
-async function fetchCurrentWeather(latitude, longitude) {
-	const url =
-		`https://api.openweathermap.org/data/4.0/onecall/current` +
+function buildOpenWeatherUrl(endpoint, latitude, longitude) {
+	// 集中管理所有 One Call 4.0 請求共用的座標、授權、單位與語系參數。
+	return `https://api.openweathermap.org/data/4.0/onecall/${endpoint}` +
 		`?lat=${latitude}` +
 		`&lon=${longitude}` +
 		`&appid=${API_KEY}` +
 		`&units=${UNITS}` +
 		`&lang=${LANG}`;
+}
+
+// ========= API 呼叫：目前天氣 =========
+async function fetchCurrentWeather(latitude, longitude) {
+	const url = buildOpenWeatherUrl("current", latitude, longitude);
 
 	const json = await loadOpenWeatherJSON(url, "Current Weather");
 	if (!Array.isArray(json?.data) || json.data.length === 0) {
@@ -672,13 +578,7 @@ async function fetchCurrentWeather(latitude, longitude) {
 
 // ========= API 呼叫：當日最高 / 最低溫 =========
 async function fetchDailyTemperature(latitude, longitude) {
-	const url =
-		`https://api.openweathermap.org/data/4.0/onecall/timeline/1day` +
-		`?lat=${latitude}` +
-		`&lon=${longitude}` +
-		`&appid=${API_KEY}` +
-		`&units=${UNITS}` +
-		`&lang=${LANG}`;
+	const url = buildOpenWeatherUrl("timeline/1day", latitude, longitude);
 
 	const json = await loadOpenWeatherJSON(url, "Daily Temperature");
 	if (!Array.isArray(json?.data) || json.data.length === 0) {
@@ -696,13 +596,7 @@ async function fetchDailyTemperature(latitude, longitude) {
 
 // ========= API 呼叫：逐小時預報 =========
 async function fetchForecast(latitude, longitude) {
-	const url =
-		`https://api.openweathermap.org/data/4.0/onecall/timeline/1h` +
-		`?lat=${latitude}` +
-		`&lon=${longitude}` +
-		`&appid=${API_KEY}` +
-		`&units=${UNITS}` +
-		`&lang=${LANG}`;
+	const url = buildOpenWeatherUrl("timeline/1h", latitude, longitude);
 
 	const json = await loadOpenWeatherJSON(url, "Forecast");
 	if (!Array.isArray(json?.data) || json.data.length === 0) {
@@ -735,10 +629,8 @@ function formatTime(date) {
 }
 
 function formatTimeFromUnix(unix) {
-	const d = new Date(unix * 1000);
-	const h = d.getHours().toString().padStart(2, "0");
-	const m = d.getMinutes().toString().padStart(2, "0");
-	return `${h}:${m}`;
+	// Unix 時間先轉為 Date，再共用同一套 HH:mm 格式化邏輯。
+	return formatTime(new Date(unix * 1000));
 }
 
 function getHoursFromUnix(unix) {
