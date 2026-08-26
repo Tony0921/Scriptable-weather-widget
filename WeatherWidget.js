@@ -7,6 +7,7 @@ const secrets = importModule("WeatherSecrets")
 const API_KEY = secrets.API_KEY;
 const UNITS = "metric";             // metric = °C, imperial = °F
 const LANG = "zh_tw";               // 語系：繁中 zh_tw、英文 en
+const FORECAST_INTERVAL_HOURS = 1;   // 逐時預報間隔：只支援 1 或 2 小時
 const USE_BACKGROUND_GRADIENT = true; // 是否使用漸層背景
 
 const fm = FileManager.local();
@@ -104,16 +105,27 @@ async function run() {
 	const location = await getCurrentLocation();
 	let current = null;
 	let forecastResult = null;
+	let dailyTemperature = null;
 	let displayName = null;
 
 	if (location) {
 		const { latitude, longitude } = location;
-		// 地名、目前天氣與預報互不依賴，同時查詢可縮短小工具更新時間。
-		[displayName, current, forecastResult] = await Promise.all([
+		// 地名、目前天氣、逐時預報與每日溫度互不依賴，同時查詢可縮短小工具更新時間。
+		[displayName, current, forecastResult, dailyTemperature] = await Promise.all([
 			getDisplayName(latitude, longitude),
 			fetchCurrentWeather(latitude, longitude),
-			fetchForecast(latitude, longitude)
+			fetchForecast(latitude, longitude),
+			fetchDailyTemperature(latitude, longitude)
 		]);
+	}
+
+	// API 4.0 Current 不含當日高低溫；只有 Current 與 Daily 都成功才組成完整目前天氣。
+	if (current && dailyTemperature) {
+		current.main.temp_min = dailyTemperature.min;
+		current.main.temp_max = dailyTemperature.max;
+	} else if (current) {
+		console.error("Daily Temperature Error: 無法取得當日最高及最低溫");
+		current = null;
 	}
 
 	const liveCurrent = current;
@@ -125,18 +137,15 @@ async function run() {
 	if (!current) {
 		current = cache?.current ?? null;
 		displayName = cache?.displayName ?? null;
-	} else if (!displayName) {
-		// 定位天氣成功但地名解析失敗時，以 OpenWeather 地名代替，避免誤用舊位置名稱。
-		displayName = current.name ?? null;
 	}
 	if (!Array.isArray(forecastResult)) {
 		forecastResult = cache?.forecast ?? [];
 	}
 	const forecastList = Array.isArray(forecastResult) ? forecastResult : [];
 
-	// 兩個即時請求都成功才更新快取，避免以不完整資料覆蓋舊快取。
+	// 目前天氣（已含每日高低溫）與逐時預報都成功才更新快取，避免以不完整資料覆蓋舊快取。
 	if (liveCurrent && Array.isArray(liveForecast) && liveForecast.length > 0) {
-		saveWeatherCache(liveCurrent, liveForecast, liveDisplayName || liveCurrent.name || null);
+		saveWeatherCache(liveCurrent, liveForecast, liveDisplayName || null);
 	}
 
 	if (!current) {
@@ -167,7 +176,7 @@ async function run() {
 
 	city.addSpacer(3);
 
-	const cityText = city.addText(displayName || current.name || "目前位置");
+	const cityText = city.addText(displayName || "目前位置");
 	cityText.font = Font.boldSystemFont(12);
 	cityText.textColor = Color.white();
 
@@ -556,7 +565,7 @@ async function divider(stack, width) {
 async function fetchCurrentWeather(latitude, longitude) {
 	try {
 		const url =
-			`https://api.openweathermap.org/data/2.5/weather` +
+			`https://api.openweathermap.org/data/4.0/onecall/current` +
 			`?lat=${latitude}` +
 			`&lon=${longitude}` +
 			`&appid=${API_KEY}` +
@@ -570,18 +579,64 @@ async function fetchCurrentWeather(latitude, longitude) {
 			console.error("Current Weather Error:", json);
 			return null;
 		}
-		return json;
+
+		const data = json.data?.[0];
+		if (!data) return null;
+
+		// 將 API 4.0 扁平欄位轉成既有 UI 使用的 2.5 結構，避免改動畫面程式。
+		return {
+			dt: data.dt,
+			weather: data.weather ?? [],
+			main: {
+				temp: data.temp,
+				feels_like: data.feels_like,
+				humidity: data.humidity
+			},
+			wind: { speed: data.wind_speed ?? 0 },
+			sys: {
+				sunrise: data.sunrise,
+				sunset: data.sunset
+			}
+		};
 	} catch (e) {
 		console.error("fetchCurrentWeather Exception:", e);
 		return null;
 	}
 }
 
-// ========= API 呼叫：5 天 / 3 小時預報 =========
+// ========= API 呼叫：當日最高 / 最低溫 =========
+async function fetchDailyTemperature(latitude, longitude) {
+	try {
+		const url =
+			`https://api.openweathermap.org/data/4.0/onecall/timeline/1day` +
+			`?lat=${latitude}` +
+			`&lon=${longitude}` +
+			`&appid=${API_KEY}` +
+			`&units=${UNITS}` +
+			`&lang=${LANG}`;
+
+		const req = new Request(url);
+		req.timeoutInterval = 10;
+		const json = await req.loadJSON();
+		if (json.cod && json.cod !== 200) {
+			console.error("Daily Temperature Error:", json);
+			return null;
+		}
+
+		const temp = json.data?.[0]?.temp;
+		if (!Number.isFinite(temp?.min) || !Number.isFinite(temp?.max)) return null;
+		return { min: temp.min, max: temp.max };
+	} catch (e) {
+		console.error("fetchDailyTemperature Exception:", e);
+		return null;
+	}
+}
+
+// ========= API 呼叫：逐小時預報 =========
 async function fetchForecast(latitude, longitude) {
 	try {
 		const url =
-			`https://api.openweathermap.org/data/2.5/forecast` +
+			`https://api.openweathermap.org/data/4.0/onecall/timeline/1h` +
 			`?lat=${latitude}` +
 			`&lon=${longitude}` +
 			`&appid=${API_KEY}` +
@@ -597,8 +652,23 @@ async function fetchForecast(latitude, longitude) {
 			return null;
 		}
 
-		if (json.list && json.list.length > 0) {
-			return json.list; // 最近的 3 小時區間
+		if (json.data && json.data.length > 0) {
+			const interval = [1, 2].includes(FORECAST_INTERVAL_HOURS)
+				? FORECAST_INTERVAL_HOURS
+				: 1;
+
+			// 依設定抽取每 1 或 2 小時資料，再轉成既有預報 UI 使用的結構。
+			return json.data
+				.filter((_, index) => index % interval === 0)
+				.slice(0, 8)
+				.map(item => ({
+					dt: item.dt,
+					main: { temp: item.temp },
+					weather: item.weather ?? [],
+					pop: item.pop ?? 0,
+					rain: item.rain,
+					wind: { speed: item.wind_speed ?? 0 }
+				}));
 		}
 		return null;
 	} catch (e) {
@@ -606,7 +676,6 @@ async function fetchForecast(latitude, longitude) {
 		return null;
 	}
 }
-
 // ========= 工具函式 =========
 function formatTime(date) {
 	const h = date.getHours().toString().padStart(2, "0");
